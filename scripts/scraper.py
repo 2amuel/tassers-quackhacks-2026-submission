@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Playwright-based scraper for sign.mt that inputs letters/words, downloads generated video, and records mappings in SQLite.
+Selenium-based scraper for sign.mt that inputs letters/words, downloads generated videos, and records mappings in SQLite.
 
 Usage:
   python scripts/scraper.py a b c
@@ -8,23 +8,29 @@ Usage:
   python scripts/scraper.py --file words.txt
 
 Notes:
-- Requires Playwright Python. Install with `pip install -r requirements.txt` then `playwright install`.
+- Requires Selenium Python and webdriver-manager. Install with `pip install -r requirements.txt`.
 - Output files are saved to `output/` and mapping to `videos.db`.
 """
-import sys
-import time
+import argparse
+import os
 import sqlite3
-from pathlib import Path
+import time
 from datetime import datetime
-from argparse import ArgumentParser
+from pathlib import Path
 
-from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+from selenium import webdriver
+from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
+from selenium.webdriver.chrome.service import Service as ChromeService
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from webdriver_manager.chrome import ChromeDriverManager
 
 BASE_URL = "https://sign.mt/?lang=en"
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output"
 DB_PATH = ROOT / "videos.db"
-
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -35,7 +41,7 @@ def ensure_db():
         """
         CREATE TABLE IF NOT EXISTS letters (
             letter TEXT PRIMARY KEY,
-            filename TEXT NOT NULL,
+            filename TEXT,
             created_at TEXT NOT NULL
         )
         """
@@ -44,153 +50,194 @@ def ensure_db():
     return conn
 
 
-def find_and_fill_input(page, text):
-    selectors = ["textarea", "input[type=\"text\"]", "input", "[contenteditable=\"true\"]"]
-    for sel in selectors:
+def create_driver(headless=True):
+    options = webdriver.ChromeOptions()
+    if headless:
+        options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1400,1000")
+    preferences = {
+        "download.default_directory": str(OUTPUT_DIR.resolve()),
+        "download.prompt_for_download": False,
+        "download.directory_upgrade": True,
+        "safebrowsing.enabled": True,
+        "profile.default_content_setting_values.automatic_downloads": 1,
+    }
+    options.add_experimental_option("prefs", preferences)
+
+    service = ChromeService(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=options)
+    driver.set_page_load_timeout(60)
+    return driver
+
+
+def fill_text_input(driver, text):
+    selectors = [
+        (By.CSS_SELECTOR, 'textarea'),
+        (By.CSS_SELECTOR, 'input[type="text"]'),
+        (By.CSS_SELECTOR, 'input'),
+        (By.CSS_SELECTOR, '[contenteditable="true"]'),
+    ]
+    for by, selector in selectors:
         try:
-            el = page.query_selector(sel)
-            if el:
+            element = driver.find_element(by, selector)
+            if element:
                 try:
-                    el.fill(text)
+                    element.clear()
+                    element.send_keys(text)
                     return True
-                except Exception:
-                    page.evaluate("(s,v)=>{const e=document.querySelector(s); if(e){ e.value=v; e.dispatchEvent(new Event('input',{bubbles:true})); }}", sel, text)
+                except WebDriverException:
+                    driver.execute_script(
+                        "const el = document.querySelector(arguments[0]); if (el) { el.textContent = arguments[1]; el.dispatchEvent(new Event('input', { bubbles: true })); }",
+                        selector,
+                        text,
+                    )
                     return True
-        except Exception:
+        except NoSuchElementException:
             continue
     return False
 
 
-def try_trigger_generate(page):
-    # Attempt several heuristics to trigger generation
-    # 1) press Enter
+def click_generate(driver):
     try:
-        page.keyboard.press("Enter")
+        driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ENTER)
         return True
-    except Exception:
+    except WebDriverException:
         pass
 
-    # 2) click buttons containing Generate/Play/Sign/Submit
-    texts = ["generate", "play", "sign", "submit", "go", "convert"]
-    for t in texts:
-        btn = page.query_selector(f"xpath=//button[contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{t}')]")
-        if btn:
-            try:
-                btn.click()
-                return True
-            except Exception:
-                pass
-
+    text_options = ["generate", "play", "sign", "submit", "go", "convert"]
+    for text in text_options:
+        xpath = (
+            f"//button[contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{text}')]"
+        )
+        try:
+            button = driver.find_element(By.XPATH, xpath)
+            button.click()
+            return True
+        except NoSuchElementException:
+            continue
+        except WebDriverException:
+            continue
     return False
 
 
-def download_for_word(page, word, timeout=20000):
-    # Wait for a download link or trigger a button that starts a download
-    # First look for <a download>
+def find_download_control(driver):
     try:
-        dl = page.query_selector('a[download]')
-        if dl:
-            with page.expect_download(timeout=timeout) as download_info:
-                dl.click()
-            download = download_info.value
-            return download
-    except PWTimeout:
-        pass
-    except Exception:
+        return driver.find_element(By.CSS_SELECTOR, 'a[download]')
+    except NoSuchElementException:
         pass
 
-    # Try clicking any link with 'download' in text
     try:
-        dl = page.query_selector("xpath=//a[contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'download')]")
-        if dl:
-            with page.expect_download(timeout=timeout) as download_info:
-                dl.click()
-            return download_info.value
-    except Exception:
+        return driver.find_element(
+            By.XPATH,
+            "//a[contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'download') or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'save')]",
+        )
+    except NoSuchElementException:
         pass
 
-    # Try buttons with download text
     try:
-        btn = page.query_selector("xpath=//button[contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'download')]")
-        if btn:
-            with page.expect_download(timeout=timeout) as download_info:
-                btn.click()
-            return download_info.value
-    except Exception:
+        return driver.find_element(
+            By.XPATH,
+            "//button[contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'download') or contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'save')]")
+    except NoSuchElementException:
         pass
 
     return None
 
 
+def wait_for_new_download(existing_names, timeout=60):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        current_files = {p.name for p in OUTPUT_DIR.iterdir() if p.is_file()}
+        new_files = current_files - existing_names
+        if new_files:
+            valid_files = [name for name in new_files if not name.endswith(".crdownload")]
+            if valid_files:
+                return sorted(valid_files)[0]
+        time.sleep(1)
+    return None
+
+
 def scrape(words, headless=True):
     conn = ensure_db()
-    cur = conn.cursor()
+    cursor = conn.cursor()
+    driver = create_driver(headless=headless)
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=headless)
-        context = browser.new_context(accept_downloads=True)
-        page = context.new_page()
+    for word in words:
+        print(f"Processing: {word}")
+        try:
+            driver.get(BASE_URL)
+        except WebDriverException as exc:
+            print("Failed to load page:", exc)
+            break
 
-        for word in words:
-            print(f"Processing: {word}")
-            page.goto(BASE_URL)
-            time.sleep(1)
+        time.sleep(2)
 
-            filled = find_and_fill_input(page, word)
-            if not filled:
-                print("Warning: couldn't find input box; skipping", word)
-                continue
+        if not fill_text_input(driver, word):
+            print("Warning: could not find input field for", word)
+            continue
 
-            triggered = try_trigger_generate(page)
-            if not triggered:
-                print("Warning: couldn't trigger generation for", word)
+        if not click_generate(driver):
+            print("Warning: could not trigger generation for", word)
 
-            # Try to download
-            download = None
+        time.sleep(2)
+
+        existing_names = {p.name for p in OUTPUT_DIR.iterdir() if p.is_file()}
+        control = find_download_control(driver)
+        downloaded_name = None
+
+        if control:
             try:
-                download = download_for_word(page, word, timeout=20000)
-            except Exception as e:
-                print("Download check error:", e)
+                control.click()
+                downloaded_name = wait_for_new_download(existing_names, timeout=45)
+            except WebDriverException as exc:
+                print("Failed to click download control for", word, exc)
+        else:
+            print("No download control found for", word)
 
-            if download is None:
-                # As a fallback, take a short video/screenshot or save page for debugging
-                print(f"No download detected for {word}. Saving debug snapshot.")
-                page.screenshot(path=OUTPUT_DIR / f"{word}-debug.png", full_page=True)
-                cur.execute("INSERT OR REPLACE INTO letters(letter, filename, created_at) VALUES(?,?,?)",
-                            (word, None, datetime.utcnow().isoformat()))
-                conn.commit()
-                continue
+        if downloaded_name is None:
+            screenshot_path = OUTPUT_DIR / f"{word}-debug.png"
+            driver.save_screenshot(str(screenshot_path))
+            print(f"No video downloaded for {word}. Saved debug screenshot to {screenshot_path}")
+            cursor.execute(
+                "INSERT OR REPLACE INTO letters(letter, filename, created_at) VALUES(?,?,?)",
+                (word, None, datetime.utcnow().isoformat()),
+            )
+            conn.commit()
+            continue
 
-            # Save the download as word.mp4
-            save_path = OUTPUT_DIR / f"{word}.mp4"
-            try:
-                download.save_as(str(save_path))
-                print(f"Saved {save_path}")
-                cur.execute("INSERT OR REPLACE INTO letters(letter, filename, created_at) VALUES(?,?,?)",
-                            (word, save_path.name, datetime.utcnow().isoformat()))
-                conn.commit()
-            except Exception as e:
-                print("Failed to save download for", word, e)
+        saved_name = downloaded_name
+        print(f"Downloaded {saved_name} for {word}")
+        cursor.execute(
+            "INSERT OR REPLACE INTO letters(letter, filename, created_at) VALUES(?,?,?)",
+            (word, saved_name, datetime.utcnow().isoformat()),
+        )
+        conn.commit()
 
-            time.sleep(1)
+        time.sleep(1)
 
-        browser.close()
+    driver.quit()
     conn.close()
 
 
-def main():
-    parser = ArgumentParser()
+def parse_args():
+    parser = argparse.ArgumentParser(description='Sign.mt video scraper using Selenium.')
     parser.add_argument('words', nargs='*', help='Words or letters to generate')
     parser.add_argument('--file', '-f', help='Path to a file with words, one per line')
     parser.add_argument('--no-headless', dest='headless', action='store_false', help='Run browser visible')
     parser.set_defaults(headless=True)
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    words = args.words or []
+
+def main():
+    args = parse_args()
+    words = list(args.words)
     if args.file:
-        p = Path(args.file)
-        if p.exists():
-            words.extend([line.strip() for line in p.read_text().splitlines() if line.strip()])
+        path = Path(args.file)
+        if path.exists():
+            words.extend([line.strip() for line in path.read_text().splitlines() if line.strip()])
 
     if not words:
         words = list('abcdefghijklmnopqrstuvwxyz')
