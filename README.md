@@ -62,3 +62,34 @@ python -m http.server 8000
 ```
 
 Then visit `http://localhost:8000`.
+
+## VideoCreator automation
+
+This repo includes a helper script to automate generating videos for basic vocabulary (letters `a`–`z`) from https://sign.mt and store the results in a local SQLite database.
+
+Requirements:
+
+- Node.js 16+ and npm
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the generator (this will open a browser window and attempt to automate the site):
+
+```bash
+npm run create-videos
+```
+
+Output:
+
+- `videos/` directory containing downloaded files (e.g. `a.mp4`).
+- `videos.db` SQLite database with table `letters(letter, filename, created_at)` mapping letters to filenames.
+
+Notes and troubleshooting:
+
+- The script uses heuristics to find input boxes and download links on the site. If the site UI changes, update selectors in `scripts/video_creator.js`.
+- For production or robust scraping, consider adding retries, proxying, or using the sign.mt API if available.
+
