@@ -1,0 +1,3 @@
+torch
+mediapipe
+opencv-python
