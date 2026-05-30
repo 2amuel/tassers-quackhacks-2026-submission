@@ -1,0 +1,14 @@
+[project]
+name = "mediapipe-holistic-pose-template"
+version = "0.1.0"
+description = "Template webcam capture project using MediaPipe Holistic pose graphs."
+requires-python = ">=3.9,<3.12"
+dependencies = [
+  "mediapipe>=0.10.35",
+  "opencv-python>=4.9.0",
+  "matplotlib>=3.8.0",
+  "numpy>=1.26.0",
+]
+
+[tool.ruff]
+line-length = 100
