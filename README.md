@@ -2,13 +2,12 @@
 
 This repository now uses a Python Selenium scraper as the primary method to generate ASL videos from https://sign.mt.
 
-The old JavaScript frontend has been removed from this branch; the focus is on programmatically creating videos for vocabulary (letters, words) and storing them locally with a SQLite mapping.
+The old JavaScript frontend has been removed from this branch; the focus is on programmatically creating videos for vocabulary (letters, words) and saving them locally in an output folder.
 
 ## Files of interest
 
-- `scripts/scraper.py` — main Python scraper that automates the site, downloads videos into `output/`, and records mappings in `videos.db`.
+- `scripts/scraper.py` — main Python scraper that automates the site, downloads videos into `output/`, and names them by the requested word.
 - `requirements.txt` — Python dependencies (Selenium and webdriver-manager).
-- `videos.db` — SQLite database created after running the scraper (not checked into repo).
 
 ## Setup
 
@@ -40,8 +39,7 @@ python scripts/scraper.py --no-headless
 
 ## Output
 
-- `output/` directory with downloaded videos (e.g., `a.mp4`)
-- `videos.db` SQLite database mapping letters/words to filenames
+- `output/` directory with downloaded videos named by the requested word (e.g., `a.mp4`)
 
 ## Notes
 

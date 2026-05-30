@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Selenium-based scraper for sign.mt that inputs letters/words, downloads generated videos, and records mappings in SQLite.
+Selenium-based scraper for sign.mt that inputs letters/words, downloads generated videos, and saves them in an output folder.
 
 Usage:
   python scripts/scraper.py a b c
@@ -9,45 +9,23 @@ Usage:
 
 Notes:
 - Requires Selenium Python and webdriver-manager. Install with `pip install -r requirements.txt`.
-- Output files are saved to `output/` and mapping to `videos.db`.
+- Output files are saved to `output/`.
 """
 import argparse
-import os
-import sqlite3
 import time
-from datetime import datetime
 from pathlib import Path
 
 from selenium import webdriver
-from selenium.common.exceptions import NoSuchElementException, TimeoutException, WebDriverException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException
 from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 BASE_URL = "https://sign.mt/?lang=en"
 ROOT = Path(__file__).resolve().parents[1]
 OUTPUT_DIR = ROOT / "output"
-DB_PATH = ROOT / "videos.db"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def ensure_db():
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS letters (
-            letter TEXT PRIMARY KEY,
-            filename TEXT,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.commit()
-    return conn
 
 
 def create_driver(headless=True):
@@ -71,6 +49,12 @@ def create_driver(headless=True):
     driver = webdriver.Chrome(service=service, options=options)
     driver.set_page_load_timeout(60)
     return driver
+
+
+def sanitize_name(text):
+    safe = ''.join(c for c in text if c.isalnum() or c in (' ', '-', '_')).strip()
+    safe = safe.replace(' ', '_')
+    return safe or 'output'
 
 
 def fill_text_input(driver, text):
@@ -161,8 +145,6 @@ def wait_for_new_download(existing_names, timeout=60):
 
 
 def scrape(words, headless=True):
-    conn = ensure_db()
-    cursor = conn.cursor()
     driver = create_driver(headless=headless)
 
     for word in words:
@@ -201,25 +183,25 @@ def scrape(words, headless=True):
             screenshot_path = OUTPUT_DIR / f"{word}-debug.png"
             driver.save_screenshot(str(screenshot_path))
             print(f"No video downloaded for {word}. Saved debug screenshot to {screenshot_path}")
-            cursor.execute(
-                "INSERT OR REPLACE INTO letters(letter, filename, created_at) VALUES(?,?,?)",
-                (word, None, datetime.utcnow().isoformat()),
-            )
-            conn.commit()
             continue
 
-        saved_name = downloaded_name
-        print(f"Downloaded {saved_name} for {word}")
-        cursor.execute(
-            "INSERT OR REPLACE INTO letters(letter, filename, created_at) VALUES(?,?,?)",
-            (word, saved_name, datetime.utcnow().isoformat()),
-        )
-        conn.commit()
+        downloaded_path = OUTPUT_DIR / downloaded_name
+        filename = sanitize_name(word)
+        ext = downloaded_path.suffix if downloaded_path.suffix else '.mp4'
+        target_path = OUTPUT_DIR / f"{filename}{ext}"
+        if downloaded_path.exists() and downloaded_path != target_path:
+            try:
+                downloaded_path.rename(target_path)
+                print(f"Saved {target_path} for {word}")
+            except OSError:
+                print(f"Could not rename downloaded file {downloaded_path} to {target_path}")
+                target_path = downloaded_path
+        else:
+            print(f"Saved {target_path} for {word}")
 
         time.sleep(1)
 
     driver.quit()
-    conn.close()
 
 
 def parse_args():
