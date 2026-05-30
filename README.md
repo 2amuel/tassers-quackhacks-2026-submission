@@ -93,3 +93,38 @@ Notes and troubleshooting:
 - The script uses heuristics to find input boxes and download links on the site. If the site UI changes, update selectors in `scripts/video_creator.js`.
 - For production or robust scraping, consider adding retries, proxying, or using the sign.mt API if available.
 
+### Python scraper (alternative)
+
+There's a Python-based scraper at `scripts/scraper.py` which uses Playwright to automate the site, input letters/words, and download the generated videos into `output/`.
+
+Setup:
+
+```bash
+python -m pip install -r requirements.txt
+python -m playwright install
+```
+
+Run (default: letters a-z):
+
+```bash
+python scripts/scraper.py
+```
+
+Run with a file containing words (one per line):
+
+```bash
+python scripts/scraper.py --file words.txt
+```
+
+Run with visible browser for debugging:
+
+```bash
+python scripts/scraper.py --no-headless
+```
+
+Output:
+
+- `output/` directory with downloaded videos (e.g., `a.mp4`)
+- `videos.db` SQLite database mapping letters to filenames
+
+
