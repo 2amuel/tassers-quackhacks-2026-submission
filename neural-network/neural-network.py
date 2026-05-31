@@ -61,11 +61,19 @@ SELECTED_FACE_LANDMARKS = (
 )
 
 COORDS_PER_LANDMARK = 3
+CONFIDENCE_FEATURES_PER_LANDMARK = 1
+FEATURES_PER_LANDMARK = COORDS_PER_LANDMARK + CONFIDENCE_FEATURES_PER_LANDMARK
 SEQUENCE_LENGTH = 60
 
-HAND_FEATURES = NUM_HANDS * HAND_LANDMARKS_PER_HAND * COORDS_PER_LANDMARK
-POSE_FEATURES = POSE_LANDMARKS * COORDS_PER_LANDMARK
-FACE_FEATURES = len(SELECTED_FACE_LANDMARKS) * COORDS_PER_LANDMARK
+HAND_LANDMARKS = NUM_HANDS * HAND_LANDMARKS_PER_HAND
+FACE_LANDMARKS = len(SELECTED_FACE_LANDMARKS)
+LANDMARKS_PER_FRAME = HAND_LANDMARKS + POSE_LANDMARKS + FACE_LANDMARKS
+
+HAND_FEATURES = HAND_LANDMARKS * FEATURES_PER_LANDMARK
+POSE_FEATURES = POSE_LANDMARKS * FEATURES_PER_LANDMARK
+FACE_FEATURES = FACE_LANDMARKS * FEATURES_PER_LANDMARK
+COORDINATE_FEATURES_PER_FRAME = LANDMARKS_PER_FRAME * COORDS_PER_LANDMARK
+CONFIDENCE_FEATURES_PER_FRAME = LANDMARKS_PER_FRAME * CONFIDENCE_FEATURES_PER_LANDMARK
 INPUT_FEATURES_PER_FRAME = HAND_FEATURES + POSE_FEATURES + FACE_FEATURES
 
 
@@ -77,6 +85,11 @@ class LandmarkLayout:
     pose_landmarks: int = POSE_LANDMARKS
     selected_face_landmarks: tuple[int, ...] = SELECTED_FACE_LANDMARKS
     coords_per_landmark: int = COORDS_PER_LANDMARK
+    confidence_features_per_landmark: int = CONFIDENCE_FEATURES_PER_LANDMARK
+    features_per_landmark: int = FEATURES_PER_LANDMARK
+    landmarks_per_frame: int = LANDMARKS_PER_FRAME
+    coordinate_features_per_frame: int = COORDINATE_FEATURES_PER_FRAME
+    confidence_features_per_frame: int = CONFIDENCE_FEATURES_PER_FRAME
     input_features_per_frame: int = INPUT_FEATURES_PER_FRAME
     output_tokens: tuple[str, ...] = OUTPUT_TOKENS
 
@@ -84,18 +97,24 @@ class LandmarkLayout:
 class PositionalEncoding(nn.Module):
     def __init__(self, embed_dim: int, max_len: int = SEQUENCE_LENGTH):
         super().__init__()
+        self.embed_dim = embed_dim
+        self.register_buffer("pe", self._build(max_len))
+
+    def _build(self, max_len: int) -> torch.Tensor:
         position = torch.arange(max_len, dtype=torch.float32).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, embed_dim, 2, dtype=torch.float32)
-            * (-torch.log(torch.tensor(10000.0)) / embed_dim)
+            torch.arange(0, self.embed_dim, 2, dtype=torch.float32)
+            * (-torch.log(torch.tensor(10000.0)) / self.embed_dim)
         )
 
-        pe = torch.zeros(max_len, embed_dim)
+        pe = torch.zeros(max_len, self.embed_dim)
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term[: pe[:, 1::2].shape[1]])
-        self.register_buffer("pe", pe.unsqueeze(0))
+        return pe.unsqueeze(0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.size(1) > self.pe.size(1):
+            self.pe = self._build(x.size(1)).to(device=x.device, dtype=x.dtype)
         return x + self.pe[:, : x.size(1)]
 
 
@@ -103,15 +122,18 @@ class ASLTransformerCTC(nn.Module):
     """Transformer model for landmark-based ASL fingerspelling recognition.
 
     Input shape:
-        (batch, 60, 345)
+        (batch, frames, 460)
 
     Per-frame features:
-        - 2 hands * 21 landmarks * xyz = 126
-        - 33 pose landmarks * xyz = 99
-        - 40 selected face landmarks * xyz = 120
+        - 2 hands * 21 landmarks * xyzc = 168
+        - 33 pose landmarks * xyzc = 132
+        - 40 selected face landmarks * xyzc = 160
+
+    The c value is a confidence/presence feature. It is 0.0 when the landmark is
+    missing and otherwise uses MediaPipe presence/visibility when available.
 
     Output shape:
-        (60, batch, 27)
+        (frames, batch, 27)
 
     The output is log-probabilities for PyTorch's CTCLoss. Class 0 is the CTC
     blank token. Classes 1-26 are A-Z.
@@ -139,6 +161,19 @@ class ASLTransformerCTC(nn.Module):
             nn.GELU(),
             nn.Dropout(dropout),
         )
+        self.temporal_stem = nn.Sequential(
+            nn.Conv1d(
+                embed_dim,
+                embed_dim,
+                kernel_size=5,
+                padding=2,
+                groups=embed_dim,
+            ),
+            nn.Conv1d(embed_dim, embed_dim, kernel_size=1),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.pre_encoder_norm = nn.LayerNorm(embed_dim)
         self.position = PositionalEncoding(embed_dim, max_sequence_length)
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -151,7 +186,18 @@ class ASLTransformerCTC(nn.Module):
             norm_first=True,
         )
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        self.output_layer = nn.Linear(embed_dim, num_classes)
+        self.output_layer = nn.Sequential(
+            nn.LayerNorm(embed_dim),
+            nn.Dropout(dropout),
+            nn.Linear(embed_dim, num_classes),
+        )
+        self._initialize_ctc_output()
+
+    def _initialize_ctc_output(self) -> None:
+        classifier = self.output_layer[-1]
+        nn.init.xavier_uniform_(classifier.weight)
+        nn.init.constant_(classifier.bias, -2.0)
+        classifier.bias.data[0] = 2.0
 
     def forward(
         self,
@@ -167,6 +213,14 @@ class ASLTransformerCTC(nn.Module):
             )
 
         x = self.input_projection(landmarks)
+        if padding_mask is not None:
+            x = x.masked_fill(padding_mask.unsqueeze(-1), 0.0)
+
+        x = self.temporal_stem(x.transpose(1, 2)).transpose(1, 2)
+        x = self.pre_encoder_norm(x)
+        if padding_mask is not None:
+            x = x.masked_fill(padding_mask.unsqueeze(-1), 0.0)
+
         x = self.position(x)
         x = self.encoder(x, src_key_padding_mask=padding_mask)
         logits = self.output_layer(x)
@@ -198,7 +252,7 @@ def example_ctc_loss() -> torch.Tensor:
 
 if __name__ == "__main__":
     model = create_model()
-    sample = torch.randn(4, SEQUENCE_LENGTH, INPUT_FEATURES_PER_FRAME)
+    sample = torch.randn(4, 81, INPUT_FEATURES_PER_FRAME)
     output = model(sample)
 
     print(f"Input shape:  {tuple(sample.shape)}")
