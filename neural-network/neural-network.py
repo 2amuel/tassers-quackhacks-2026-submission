@@ -229,8 +229,8 @@ class ASLTransformerCTC(nn.Module):
         return F.log_softmax(logits, dim=-1).transpose(0, 1)
 
 
-def create_model() -> ASLTransformerCTC:
-    return ASLTransformerCTC()
+def create_model(max_sequence_length: int = SEQUENCE_LENGTH) -> ASLTransformerCTC:
+    return ASLTransformerCTC(max_sequence_length=max_sequence_length)
 
 
 def example_ctc_loss() -> torch.Tensor:

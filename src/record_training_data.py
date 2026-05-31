@@ -123,6 +123,12 @@ def random_prompt_letters(letter_count: int | None) -> list[str]:
     return random.choices(string.ascii_uppercase, k=count)
 
 
+def print_signing_prompt(prompt_letters: list[str]) -> None:
+    print("\nSign these letters in order:")
+    print(" ".join(prompt_letters))
+    print("\nLeave a short pause between letters so blank frames can be labeled.")
+
+
 def wait_for_enter(message: str) -> None:
     input(f"{message}\nPress Enter when ready.")
 
@@ -325,9 +331,7 @@ def main() -> None:
     csv_path = output_dir / "labeled_holistic_landmarks.csv"
     prompt_letters = random_prompt_letters(args.letter_count)
 
-    print("\nSign these letters in order:")
-    print(" ".join(prompt_letters))
-    print("\nLeave a short pause between letters so blank frames can be labeled.")
+    print_signing_prompt(prompt_letters)
 
     clip_info = None
     while True:
@@ -338,6 +342,7 @@ def main() -> None:
         action = prompt_recording_action()
         if action == "label":
             break
+        print_signing_prompt(prompt_letters)
 
     print("\nConverting recording to 5 FPS landmark samples...")
     landmark_rows, sample_count = load_video_samples(video_path, output_dir, args)

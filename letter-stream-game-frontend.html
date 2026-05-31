@@ -1,0 +1,1056 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SignNinja</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #2f3432;
+        --panel: rgba(23, 27, 25, 0.86);
+        --panel-strong: rgba(38, 43, 40, 0.94);
+        --ink: #f6f4ec;
+        --muted: #c5cbc2;
+        --accent: #b8f06a;
+        --accent-2: #e6d06f;
+        --main: #d9f7a3;
+        --danger: #d85d4f;
+        --border: rgba(246, 244, 236, 0.2);
+        --shadow: rgba(4, 7, 5, 0.46);
+        --circle-size: clamp(58px, min(12vw, 13vh), 126px);
+        --gap: clamp(8px, min(2.6vw, 3vh), 30px);
+        --slot-step: calc(var(--circle-size) + var(--gap));
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 50% -10%, rgba(184, 240, 106, 0.14), transparent 32rem),
+          var(--bg);
+        color: var(--ink);
+        font-family:
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      main {
+        width: min(1120px, 100vw);
+        height: 100vh;
+        max-height: 100vh;
+        padding: clamp(10px, 2.4vh, 28px) clamp(14px, 3vw, 40px);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        gap: clamp(10px, 2vh, 24px);
+      }
+
+      .hud {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+      }
+
+      .title {
+        display: grid;
+        gap: 4px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(22px, 3.2vw, 40px);
+        font-weight: 800;
+        line-height: 1;
+        text-shadow: 0 0 20px rgba(184, 240, 106, 0.3);
+      }
+
+      .subtitle,
+      .key-hint {
+        margin: 0;
+        color: var(--muted);
+        font-size: clamp(14px, 1.7vw, 18px);
+      }
+
+      .scoreboard {
+        display: flex;
+        align-items: stretch;
+        gap: 10px;
+      }
+
+      .scorebox {
+        min-width: 112px;
+        padding: clamp(8px, 1.2vh, 12px) 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: rgba(23, 27, 25, 0.78);
+        box-shadow: 0 16px 40px var(--shadow);
+        backdrop-filter: blur(8px);
+      }
+
+      .scorebox span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .scorebox strong {
+        display: block;
+        margin-top: 2px;
+        font-size: clamp(22px, 3.2vw, 34px);
+        line-height: 1;
+      }
+
+      .scorebox.timer-box strong {
+        color: var(--accent-2);
+      }
+
+      .stage {
+        min-height: 0;
+        display: grid;
+        justify-items: center;
+        align-content: start;
+        gap: clamp(12px, 2.4vh, 28px);
+      }
+
+      .stream-window {
+        width: min(
+          100%,
+          calc((var(--circle-size) * 5) + (var(--gap) * 4) + 40px)
+        );
+        height: calc(var(--circle-size) + clamp(20px, 3vh, 40px));
+        overflow: hidden;
+        position: relative;
+        padding: clamp(10px, 1.5vh, 20px) 20px;
+        isolation: isolate;
+        z-index: 5;
+        mask-image: linear-gradient(
+          90deg,
+          transparent 0,
+          #000 34px,
+          #000 calc(100% - 34px),
+          transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+          90deg,
+          transparent 0,
+          #000 34px,
+          #000 calc(100% - 34px),
+          transparent 100%
+        );
+      }
+
+      .stream-window::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 999px;
+        background: linear-gradient(
+          90deg,
+          rgba(10, 13, 12, 0.9),
+          rgba(184, 240, 106, 0.08),
+          rgba(10, 13, 12, 0.9)
+        );
+        opacity: 0.9;
+        z-index: -1;
+      }
+
+      .stream-window::after {
+        content: "";
+        position: absolute;
+        top: clamp(10px, 1.5vh, 20px);
+        left: calc(20px + (var(--slot-step) * 2));
+        width: var(--circle-size);
+        height: var(--circle-size);
+        border: 4px solid rgba(184, 240, 106, 0.92);
+        border-radius: 50%;
+        box-shadow:
+          0 0 0 7px rgba(20, 24, 21, 0.46),
+          0 0 30px rgba(184, 240, 106, 0.7),
+          0 18px 48px rgba(4, 7, 5, 0.52);
+        pointer-events: none;
+        z-index: 4;
+      }
+
+      .circle-track {
+        display: flex;
+        gap: var(--gap);
+        width: max-content;
+        transform: translateX(0);
+        position: relative;
+        z-index: 2;
+      }
+
+      .circle-track.is-moving {
+        transition: transform 300ms cubic-bezier(0.22, 0.88, 0.26, 1);
+        transform: translateX(calc(var(--slot-step) * -1));
+      }
+
+      .letter-circle {
+        width: var(--circle-size);
+        height: var(--circle-size);
+        flex: 0 0 var(--circle-size);
+        display: grid;
+        place-items: center;
+        border: 3px solid rgba(246, 244, 236, 0.24);
+        border-radius: 50%;
+        background:
+          linear-gradient(
+            150deg,
+            rgba(246, 244, 236, 0.16),
+            rgba(184, 240, 106, 0.06)
+          ),
+          var(--panel);
+        color: var(--ink);
+        font-size: clamp(42px, 7.5vw, 84px);
+        font-weight: 900;
+        line-height: 1;
+        text-transform: uppercase;
+        text-shadow: 0 5px 18px rgba(0, 0, 0, 0.38);
+        box-shadow:
+          inset 0 1px 0 rgba(246, 244, 236, 0.22),
+          0 18px 42px var(--shadow);
+        transform: scale(0.92);
+        transition: transform 180ms ease;
+        user-select: none;
+      }
+
+      .letter-circle.main {
+        position: relative;
+        z-index: 3;
+        transform: scale(1);
+      }
+
+      .letter-circle.cracked {
+        overflow: hidden;
+      }
+
+      .letter-circle.cracked::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 116%;
+        height: 5px;
+        border-radius: 999px;
+        background:
+          linear-gradient(90deg, transparent, rgba(5, 7, 6, 0.96) 12%, rgba(184, 240, 106, 0.9) 50%, rgba(5, 7, 6, 0.96) 88%, transparent);
+        box-shadow: 0 0 14px rgba(184, 240, 106, 0.34);
+        transform: translate(-50%, -50%) rotate(var(--crack-angle));
+        z-index: 4;
+      }
+
+      .letter-half {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+
+      .letter-half.upper {
+        clip-path: inset(0 0 50% 0);
+        transform: translate(var(--crack-upper-x), var(--crack-upper-y));
+      }
+
+      .letter-half.lower {
+        clip-path: inset(50% 0 0 0);
+        transform: translate(var(--crack-lower-x), var(--crack-lower-y));
+      }
+
+      .play-panel {
+        width: min(820px, 100%);
+        display: grid;
+        gap: clamp(8px, 1.4vh, 16px);
+        justify-items: center;
+        text-align: center;
+      }
+
+      .camera-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 74px minmax(0, 1fr);
+        align-items: stretch;
+        gap: 18px;
+      }
+
+      .health-panel {
+        display: grid;
+        gap: clamp(8px, 1.3vh, 12px);
+        align-content: center;
+      }
+
+      .health-point {
+        min-height: clamp(42px, 8vh, 74px);
+        border: 2px solid var(--border);
+        border-radius: 8px;
+        background:
+          linear-gradient(
+            150deg,
+            rgba(255, 247, 230, 0.2),
+            rgba(255, 247, 230, 0.04)
+          ),
+          rgba(159, 203, 105, 0.34);
+        box-shadow: 0 14px 30px var(--shadow);
+      }
+
+      .health-point.is-empty {
+        background: rgba(34, 45, 31, 0.66);
+        border-color: rgba(216, 93, 79, 0.55);
+        opacity: 0.42;
+      }
+
+      .main-letter {
+        width: min(100%, 620px);
+        height: min(34vh, 330px);
+        min-height: 190px;
+        position: relative;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #10150e;
+        box-shadow: 0 24px 70px var(--shadow);
+      }
+
+      .main-letter video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1);
+      }
+
+      .main-letter::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(
+            180deg,
+            rgba(16, 21, 14, 0.08),
+            rgba(16, 21, 14, 0.44)
+          ),
+          radial-gradient(
+            circle at center,
+            transparent 40%,
+            rgba(16, 21, 14, 0.3)
+          );
+        pointer-events: none;
+      }
+
+      .camera-message {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        color: var(--muted);
+        background: linear-gradient(
+          135deg,
+          rgba(28, 39, 24, 0.96),
+          rgba(72, 58, 35, 0.9)
+        );
+        font-size: clamp(16px, 2.4vw, 22px);
+        font-weight: 800;
+        text-align: center;
+      }
+
+      .camera-message.is-hidden {
+        display: none;
+      }
+
+      .game-message {
+        min-height: 20px;
+        margin: 0;
+        color: var(--accent-2);
+        font-size: clamp(15px, 1.7vw, 18px);
+        font-weight: 800;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      button {
+        min-height: 44px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0 16px;
+        color: var(--ink);
+        background: var(--panel-strong);
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      button:hover,
+      button:focus-visible {
+        border-color: rgba(159, 203, 105, 0.82);
+        outline: none;
+      }
+
+      .score-key {
+        background: var(--accent);
+        color: #17200f;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.46;
+      }
+
+      .footer {
+        display: flex;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      kbd {
+        display: inline-grid;
+        min-width: 46px;
+        min-height: 28px;
+        place-items: center;
+        margin: 0 4px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-bottom-width: 3px;
+        border-radius: 6px;
+        padding: 2px 8px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink);
+        font-family: inherit;
+        font-size: 0.9em;
+        font-weight: 800;
+      }
+
+      @media (max-width: 700px) {
+        body {
+          overflow: hidden;
+        }
+
+        main {
+          height: 100vh;
+          min-height: 0;
+        }
+
+        .hud {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .scoreboard {
+          width: 100%;
+          flex-wrap: wrap;
+        }
+
+        .scorebox {
+          flex: 1 1 30%;
+          min-width: 92px;
+        }
+
+        .camera-row {
+          grid-template-columns: 1fr;
+        }
+
+        .health-panel {
+          grid-template-columns: repeat(3, 1fr);
+          order: 2;
+        }
+
+        .health-point {
+          min-height: 32px;
+        }
+
+        .main-letter {
+          height: min(30vh, 260px);
+          min-height: 160px;
+        }
+      }
+
+      @media (max-height: 720px) {
+        .subtitle,
+        .key-hint,
+        .footer {
+          font-size: 12px;
+        }
+
+        .main-letter {
+          height: min(30vh, 260px);
+          min-height: 150px;
+        }
+
+        button {
+          min-height: 38px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="hud" aria-label="Game status">
+        <div class="title">
+          <h1>SignNinja</h1>
+          <p class="subtitle">Sign the main letter to move forward!</p>
+        </div>
+        <div class="scoreboard">
+          <div class="scorebox">
+            <span>Score</span>
+            <strong id="score">0</strong>
+          </div>
+          <div class="scorebox">
+            <span>Streak</span>
+            <strong id="streak">0</strong>
+          </div>
+          <div class="scorebox timer-box">
+            <span>Timer</span>
+            <strong id="timer">5.0</strong>
+          </div>
+          <div class="scorebox">
+            <span>Signs/min</span>
+            <strong id="scoresPerMinute">0</strong>
+          </div>
+          <div class="scorebox">
+            <span>Backend</span>
+            <strong id="backendLetter">-</strong>
+          </div>
+        </div>
+      </header>
+
+      <section class="stage" aria-label="SignNinja game">
+        <div class="stream-window" aria-live="polite">
+          <div class="circle-track" id="circleTrack"></div>
+        </div>
+
+        <div class="play-panel">
+          <div class="camera-row">
+            <div
+              class="health-panel"
+              id="healthPanel"
+              aria-label="Health points"
+            >
+              <div class="health-point" aria-label="Health point 1"></div>
+              <div class="health-point" aria-label="Health point 2"></div>
+              <div class="health-point" aria-label="Health point 3"></div>
+            </div>
+            <div class="main-letter">
+              <video id="webcamVideo" autoplay muted playsinline></video>
+              <div class="camera-message" id="cameraMessage">
+                Allow camera access to fill this box with your webcam.
+              </div>
+            </div>
+          </div>
+          <p class="game-message" id="gameMessage">Press Start to begin.</p>
+          <p class="key-hint">
+            Match the center letter with your hand sign to advance the stream.
+          </p>
+          <div class="controls" aria-label="Game controls">
+            <button class="score-key" id="scoreButton" type="button">
+              Manual Score
+            </button>
+            <button id="resetButton" type="button">Start</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span
+          >Five circles show the active stream window; the center circle is
+          always the current target.</span
+        >
+      </footer>
+    </main>
+
+    <script>
+      const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const scoreKey = " ";
+      const visibleCount = 5;
+      const mainIndex = 2;
+
+      const track = document.querySelector("#circleTrack");
+      const scoreElement = document.querySelector("#score");
+      const streakElement = document.querySelector("#streak");
+      const timerElement = document.querySelector("#timer");
+      const scoresPerMinuteElement = document.querySelector("#scoresPerMinute");
+      const backendLetterElement = document.querySelector("#backendLetter");
+      const scoreButton = document.querySelector("#scoreButton");
+      const resetButton = document.querySelector("#resetButton");
+      const webcamVideo = document.querySelector("#webcamVideo");
+      const cameraMessage = document.querySelector("#cameraMessage");
+      const gameMessage = document.querySelector("#gameMessage");
+      const healthPoints = Array.from(
+        document.querySelectorAll(".health-point"),
+      );
+
+      const maxHealth = 3;
+      const timerDuration = 5;
+      let stream = [];
+      let score = 0;
+      let streak = 0;
+      let health = maxHealth;
+      let timeLeft = timerDuration;
+      let gameState = "ready";
+      let isMoving = false;
+      let timerId = null;
+      let startedAt = null;
+      let predictionTimerId = null;
+      let predictionLoopActive = false;
+      let isPredicting = false;
+      let lastPredictedVideoTime = -1;
+      let lastPrediction = null;
+      let backendAvailable = false;
+      const predictionCanvas = document.createElement("canvas");
+      const predictionContext = predictionCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
+
+      function randomLetter() {
+        return ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+      }
+
+      function createStreamEntry() {
+        return {
+          letter: randomLetter(),
+          crack: null,
+        };
+      }
+
+      function createCrackData() {
+        const angle = Math.floor(Math.random() * 140) - 70;
+        const radians = ((angle + 90) * Math.PI) / 180;
+        const distance = 9;
+
+        return {
+          angle,
+          upperX: Math.cos(radians) * distance,
+          upperY: Math.sin(radians) * distance,
+        };
+      }
+
+      function buildStream(length = 8) {
+        stream = Array.from({ length }, createStreamEntry);
+      }
+
+      function ensureStreamLength() {
+        while (stream.length < visibleCount + 2) {
+          stream.push(createStreamEntry());
+        }
+      }
+
+      function crackCircle(circle, entry) {
+        circle.classList.add("cracked");
+        circle.style.setProperty("--crack-angle", `${entry.crack.angle}deg`);
+        circle.style.setProperty("--crack-upper-x", `${entry.crack.upperX}px`);
+        circle.style.setProperty("--crack-upper-y", `${entry.crack.upperY}px`);
+        circle.style.setProperty("--crack-lower-x", `${-entry.crack.upperX}px`);
+        circle.style.setProperty("--crack-lower-y", `${-entry.crack.upperY}px`);
+        circle.setAttribute(
+          "aria-label",
+          `${entry.letter}, cracked previous letter`,
+        );
+
+        const upperHalf = document.createElement("span");
+        upperHalf.className = "letter-half upper";
+        upperHalf.textContent = entry.letter;
+
+        const lowerHalf = document.createElement("span");
+        lowerHalf.className = "letter-half lower";
+        lowerHalf.textContent = entry.letter;
+
+        circle.replaceChildren(upperHalf, lowerHalf);
+      }
+
+      function renderTrack(includeIncoming = false) {
+        ensureStreamLength();
+        const letters = includeIncoming
+          ? stream.slice(0, visibleCount + 1)
+          : stream.slice(0, visibleCount);
+
+        track.innerHTML = "";
+        const activeIndex = includeIncoming ? mainIndex + 1 : mainIndex;
+
+        letters.forEach((entry, index) => {
+          const circle = document.createElement("div");
+          circle.className =
+            index === activeIndex ? "letter-circle main" : "letter-circle";
+          if (entry.crack) {
+            crackCircle(circle, entry);
+          } else {
+            circle.textContent = entry.letter;
+            circle.setAttribute(
+              "aria-label",
+              index === activeIndex ? `${entry.letter}, main circle` : entry.letter,
+            );
+          }
+          track.append(circle);
+        });
+      }
+
+      function renderScores() {
+        scoreElement.textContent = score;
+        streakElement.textContent = streak;
+      }
+
+      function renderHealth() {
+        healthPoints.forEach((point, index) => {
+          point.classList.toggle("is-empty", index >= health);
+        });
+      }
+
+      function renderTimer() {
+        timerElement.textContent = timeLeft.toFixed(1);
+      }
+
+      function renderScoresPerMinute() {
+        if (!startedAt || score === 0) {
+          scoresPerMinuteElement.textContent = "0";
+          return;
+        }
+
+        const elapsedMinutes = Math.max(
+          (Date.now() - startedAt) / 60000,
+          1 / 60000,
+        );
+        scoresPerMinuteElement.textContent = Math.round(score / elapsedMinutes);
+      }
+
+      function setMessage(message) {
+        gameMessage.textContent = message;
+      }
+
+      function currentTargetLetter() {
+        return stream[mainIndex]?.letter ?? null;
+      }
+
+      function renderBackendLetter(letter, confidence = 0) {
+        backendLetterElement.textContent = letter
+          ? `${letter}${confidence ? ` ${Math.round(confidence * 100)}%` : ""}`
+          : "-";
+      }
+
+      function resetTimer() {
+        timeLeft = timerDuration;
+        renderTimer();
+      }
+
+      function stopTimer() {
+        if (timerId) {
+          clearInterval(timerId);
+          timerId = null;
+        }
+      }
+
+      function stopPredictionLoop() {
+        if (predictionTimerId) {
+          cancelAnimationFrame(predictionTimerId);
+          predictionTimerId = null;
+        }
+        predictionLoopActive = false;
+      }
+
+      function startTimer() {
+        stopTimer();
+        timerId = setInterval(() => {
+          if (gameState !== "playing") {
+            stopTimer();
+            return;
+          }
+
+          timeLeft = Math.max(0, timeLeft - 0.1);
+          renderTimer();
+          renderScoresPerMinute();
+
+          if (timeLeft <= 0) {
+            takeDamage();
+          }
+        }, 100);
+      }
+
+      function updateControls() {
+        const isPlaying = gameState === "playing";
+        scoreButton.disabled = !isPlaying;
+        if (gameState === "game-over") {
+          resetButton.textContent = "Play Again";
+        } else if (isPlaying) {
+          resetButton.textContent = "Restart";
+        } else {
+          resetButton.textContent = "Start";
+        }
+      }
+
+      function advanceStream() {
+        if (gameState !== "playing" || isMoving) {
+          return;
+        }
+
+        isMoving = true;
+        score += 1;
+        streak += 1;
+        stream[mainIndex].crack = createCrackData();
+        stream.push(createStreamEntry());
+        resetTimer();
+        setMessage("Nice. Keep the stream moving.");
+        renderScores();
+        renderScoresPerMinute();
+        renderTrack(true);
+
+        requestAnimationFrame(() => {
+          track.classList.add("is-moving");
+        });
+      }
+
+      function finishAdvance() {
+        if (!isMoving) {
+          return;
+        }
+
+        stream.shift();
+        track.classList.remove("is-moving");
+        renderTrack(false);
+        isMoving = false;
+      }
+
+      function takeDamage() {
+        health = Math.max(0, health - 1);
+        streak = 0;
+        renderScores();
+        renderHealth();
+        resetTimer();
+
+        if (health === 0) {
+          endGame();
+          return;
+        }
+
+        setMessage("Time ran out. One health point lost.");
+      }
+
+      function prepareGame() {
+        stopTimer();
+        score = 0;
+        streak = 0;
+        health = maxHealth;
+        gameState = "ready";
+        isMoving = false;
+        startedAt = null;
+        track.classList.remove("is-moving");
+        buildStream();
+        resetTimer();
+        renderScores();
+        renderScoresPerMinute();
+        renderHealth();
+        renderTrack(false);
+        setMessage("Press Start to begin.");
+        updateControls();
+      }
+
+      function startGame() {
+        score = 0;
+        streak = 0;
+        health = maxHealth;
+        gameState = "playing";
+        isMoving = false;
+        startedAt = Date.now();
+        track.classList.remove("is-moving");
+        buildStream();
+        resetTimer();
+        renderScores();
+        renderScoresPerMinute();
+        renderHealth();
+        renderTrack(false);
+        setMessage("Go.");
+        updateControls();
+        startTimer();
+        startPredictionLoop();
+      }
+
+      function endGame() {
+        gameState = "game-over";
+        stopTimer();
+        renderScoresPerMinute();
+        setMessage(`Game over. Final score: ${score}.`);
+        updateControls();
+      }
+
+      async function checkBackend() {
+        try {
+          const response = await fetch("/api/status");
+          const status = await response.json();
+          backendAvailable = Boolean(status.ok);
+          if (backendAvailable && !status.checkpointLoaded) {
+            setMessage("Backend connected. Add a trained checkpoint for accurate signs.");
+          } else if (backendAvailable) {
+            startPredictionLoop();
+          } else {
+            setMessage(status.error || "Prediction backend is not ready.");
+          }
+        } catch (error) {
+          backendAvailable = false;
+          setMessage("Backend is not connected. Manual Score is available for testing.");
+        }
+      }
+
+      function captureFrame() {
+        if (!webcamVideo.videoWidth || !webcamVideo.videoHeight) {
+          return null;
+        }
+
+        const width = webcamVideo.videoWidth;
+        const height = webcamVideo.videoHeight;
+        predictionCanvas.width = width;
+        predictionCanvas.height = height;
+        predictionContext.drawImage(webcamVideo, 0, 0, width, height);
+        return predictionCanvas.toDataURL("image/jpeg", 0.85);
+      }
+
+      async function requestPrediction() {
+        if (
+          !backendAvailable ||
+          isPredicting ||
+          webcamVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+        ) {
+          scheduleNextPrediction();
+          return;
+        }
+
+        if (!webcamVideo.videoWidth || !webcamVideo.videoHeight) {
+          scheduleNextPrediction();
+          return;
+        }
+
+        if (webcamVideo.currentTime === lastPredictedVideoTime) {
+          scheduleNextPrediction();
+          return;
+        }
+        lastPredictedVideoTime = webcamVideo.currentTime;
+
+        isPredicting = true;
+        try {
+          const image = captureFrame();
+          if (!image) {
+            return;
+          }
+
+          const response = await fetch("/api/predict", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ image }),
+          });
+          const prediction = await response.json();
+          if (!prediction.ok) {
+            throw new Error(prediction.error || "Prediction failed.");
+          }
+
+          lastPrediction = prediction;
+          renderBackendLetter(prediction.letter, prediction.confidence);
+
+          if (!prediction.ready) {
+            if (gameState === "playing") {
+              setMessage("Collecting sign context...");
+            }
+            return;
+          }
+
+          const target = currentTargetLetter();
+          if (
+            gameState === "playing" &&
+            prediction.letter &&
+            target &&
+            prediction.letter.toUpperCase() === target &&
+            prediction.confidence >= 0.35
+          ) {
+            advanceStream();
+          } else if (gameState === "playing" && prediction.letter) {
+            setMessage(`Backend sees ${prediction.letter}. Target: ${target}.`);
+          }
+        } catch (error) {
+          backendAvailable = false;
+          stopPredictionLoop();
+          renderBackendLetter(null);
+          setMessage("Prediction backend stopped responding. Manual Score is available.");
+        } finally {
+          isPredicting = false;
+          scheduleNextPrediction();
+        }
+      }
+
+      function startPredictionLoop() {
+        if (predictionLoopActive) {
+          return;
+        }
+        predictionLoopActive = true;
+        requestPrediction();
+      }
+
+      function scheduleNextPrediction() {
+        if (!predictionLoopActive || predictionTimerId) {
+          return;
+        }
+        predictionTimerId = requestAnimationFrame(() => {
+          predictionTimerId = null;
+          requestPrediction();
+        });
+      }
+
+      async function startWebcam() {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          cameraMessage.textContent = "This browser cannot access a webcam.";
+          return;
+        }
+
+        try {
+          const mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: "user",
+            },
+            audio: false,
+          });
+          webcamVideo.srcObject = mediaStream;
+          cameraMessage.classList.add("is-hidden");
+        } catch (error) {
+          cameraMessage.textContent =
+            "Camera access is blocked. Enable it in the browser to show your webcam here.";
+        }
+      }
+
+      track.addEventListener("transitionend", finishAdvance);
+      scoreButton.addEventListener("click", advanceStream);
+      resetButton.addEventListener("click", startGame);
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === scoreKey) {
+          event.preventDefault();
+          advanceStream();
+        }
+      });
+
+      prepareGame();
+      startWebcam();
+      checkBackend();
+    </script>
+  </body>
+</html>
