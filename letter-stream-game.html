@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Letter Stream Game</title>
+    <title>SignMasters</title>
     <style>
       :root {
         color-scheme: dark;
@@ -104,11 +104,15 @@
         line-height: 1;
       }
 
+      .scorebox.timer-box strong {
+        color: var(--accent-2);
+      }
+
       .stage {
         align-self: start;
         display: grid;
         justify-items: center;
-        gap: clamp(26px, 5vh, 56px);
+        gap: clamp(64px, 10vh, 112px);
       }
 
       .stream-window {
@@ -118,6 +122,7 @@
         position: relative;
         padding: 9px 8px;
         isolation: isolate;
+        z-index: 5;
       }
 
       .stream-window::before {
@@ -135,6 +140,8 @@
         gap: var(--gap);
         width: max-content;
         transform: translateX(0);
+        position: relative;
+        z-index: 2;
       }
 
       .circle-track.is-moving {
@@ -165,23 +172,42 @@
         user-select: none;
       }
 
-      .letter-circle.main {
-        border-color: rgba(116, 183, 255, 0.92);
-        background:
-          radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.36), transparent 35%),
-          linear-gradient(150deg, rgba(116, 183, 255, 0.42), rgba(34, 41, 56, 0.92));
-        box-shadow:
-          0 0 0 8px rgba(116, 183, 255, 0.13),
-          0 22px 56px rgba(47, 143, 255, 0.32);
-        transform: translateY(8px) scale(1.08);
-      }
-
       .play-panel {
-        width: min(680px, 100%);
+        width: min(820px, 100%);
         display: grid;
         gap: 16px;
         justify-items: center;
         text-align: center;
+      }
+
+      .camera-row {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 74px minmax(0, 1fr);
+        align-items: stretch;
+        gap: 18px;
+      }
+
+      .health-panel {
+        display: grid;
+        gap: 12px;
+        align-content: center;
+      }
+
+      .health-point {
+        min-height: 74px;
+        border: 2px solid rgba(255, 255, 255, 0.16);
+        border-radius: 8px;
+        background:
+          linear-gradient(150deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03)),
+          rgba(87, 214, 141, 0.22);
+        box-shadow: 0 14px 30px rgba(0, 0, 0, 0.24);
+      }
+
+      .health-point.is-empty {
+        background: rgba(24, 29, 38, 0.66);
+        border-color: rgba(255, 107, 122, 0.5);
+        opacity: 0.42;
       }
 
       .main-letter {
@@ -234,37 +260,12 @@
         display: none;
       }
 
-      .main-letter-label {
-        position: absolute;
-        left: 18px;
-        top: 16px;
-        z-index: 1;
-        display: block;
-        color: var(--muted);
-        font-size: 12px;
+      .game-message {
+        min-height: 24px;
+        margin: 0;
+        color: var(--accent-2);
+        font-size: clamp(15px, 1.7vw, 18px);
         font-weight: 800;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-      }
-
-      .main-letter strong {
-        position: relative;
-        z-index: 1;
-        display: block;
-        width: clamp(100px, 18vw, 168px);
-        height: clamp(100px, 18vw, 168px);
-        display: grid;
-        place-items: center;
-        border: 3px solid rgba(116, 183, 255, 0.95);
-        border-radius: 50%;
-        background: rgba(16, 19, 25, 0.62);
-        color: var(--main);
-        font-size: clamp(56px, 10vw, 112px);
-        line-height: 0.95;
-        box-shadow:
-          0 0 0 8px rgba(116, 183, 255, 0.14),
-          0 20px 46px rgba(0, 0, 0, 0.44);
-        backdrop-filter: blur(3px);
       }
 
       .controls {
@@ -295,6 +296,11 @@
       .score-key {
         background: var(--accent);
         color: #07110b;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.46;
       }
 
       .footer {
@@ -342,6 +348,19 @@
         .scorebox {
           flex: 1;
         }
+
+        .camera-row {
+          grid-template-columns: 1fr;
+        }
+
+        .health-panel {
+          grid-template-columns: repeat(3, 1fr);
+          order: 2;
+        }
+
+        .health-point {
+          min-height: 42px;
+        }
       }
     </style>
   </head>
@@ -349,7 +368,7 @@
     <main>
       <header class="hud" aria-label="Game status">
         <div class="title">
-          <h1>Letter Stream</h1>
+          <h1>SignMasters</h1>
           <p class="subtitle">Score the main letter to push the stream forward.</p>
         </div>
         <div class="scoreboard">
@@ -361,25 +380,39 @@
             <span>Streak</span>
             <strong id="streak">0</strong>
           </div>
+          <div class="scorebox timer-box">
+            <span>Timer</span>
+            <strong id="timer">5.0</strong>
+          </div>
+          <div class="scorebox">
+            <span>Scores/min</span>
+            <strong id="scoresPerMinute">0</strong>
+          </div>
         </div>
       </header>
 
-      <section class="stage" aria-label="Letter stream game">
+      <section class="stage" aria-label="SignMasters game">
         <div class="stream-window" aria-live="polite">
           <div class="circle-track" id="circleTrack"></div>
         </div>
 
         <div class="play-panel">
-          <div class="main-letter">
-            <video id="webcamVideo" autoplay muted playsinline></video>
-            <div class="camera-message" id="cameraMessage">Allow camera access to fill this box with your webcam.</div>
-            <span class="main-letter-label">Main circle</span>
-            <strong id="mainLetter">A</strong>
+          <div class="camera-row">
+            <div class="health-panel" id="healthPanel" aria-label="Health points">
+              <div class="health-point" aria-label="Health point 1"></div>
+              <div class="health-point" aria-label="Health point 2"></div>
+              <div class="health-point" aria-label="Health point 3"></div>
+            </div>
+            <div class="main-letter">
+              <video id="webcamVideo" autoplay muted playsinline></video>
+              <div class="camera-message" id="cameraMessage">Allow camera access to fill this box with your webcam.</div>
+            </div>
           </div>
+          <p class="game-message" id="gameMessage">Press Start to begin.</p>
           <p class="key-hint">Press <kbd>Space</kbd> to score and advance the stream.</p>
           <div class="controls" aria-label="Game controls">
             <button class="score-key" id="scoreButton" type="button">Score</button>
-            <button id="resetButton" type="button">Reset</button>
+            <button id="resetButton" type="button">Start</button>
           </div>
         </div>
       </section>
@@ -398,16 +431,26 @@
       const track = document.querySelector("#circleTrack");
       const scoreElement = document.querySelector("#score");
       const streakElement = document.querySelector("#streak");
-      const mainLetterElement = document.querySelector("#mainLetter");
+      const timerElement = document.querySelector("#timer");
+      const scoresPerMinuteElement = document.querySelector("#scoresPerMinute");
       const scoreButton = document.querySelector("#scoreButton");
       const resetButton = document.querySelector("#resetButton");
       const webcamVideo = document.querySelector("#webcamVideo");
       const cameraMessage = document.querySelector("#cameraMessage");
+      const gameMessage = document.querySelector("#gameMessage");
+      const healthPoints = Array.from(document.querySelectorAll(".health-point"));
 
+      const maxHealth = 3;
+      const timerDuration = 5;
       let stream = [];
       let score = 0;
       let streak = 0;
+      let health = maxHealth;
+      let timeLeft = timerDuration;
+      let gameState = "ready";
       let isMoving = false;
+      let timerId = null;
+      let startedAt = null;
 
       function randomLetter() {
         return ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
@@ -438,7 +481,6 @@
           track.append(circle);
         });
 
-        mainLetterElement.textContent = stream[mainIndex];
       }
 
       function renderScores() {
@@ -446,8 +488,74 @@
         streakElement.textContent = streak;
       }
 
+      function renderHealth() {
+        healthPoints.forEach((point, index) => {
+          point.classList.toggle("is-empty", index >= health);
+        });
+      }
+
+      function renderTimer() {
+        timerElement.textContent = timeLeft.toFixed(1);
+      }
+
+      function renderScoresPerMinute() {
+        if (!startedAt || score === 0) {
+          scoresPerMinuteElement.textContent = "0";
+          return;
+        }
+
+        const elapsedMinutes = Math.max((Date.now() - startedAt) / 60000, 1 / 60000);
+        scoresPerMinuteElement.textContent = Math.round(score / elapsedMinutes);
+      }
+
+      function setMessage(message) {
+        gameMessage.textContent = message;
+      }
+
+      function resetTimer() {
+        timeLeft = timerDuration;
+        renderTimer();
+      }
+
+      function stopTimer() {
+        if (timerId) {
+          clearInterval(timerId);
+          timerId = null;
+        }
+      }
+
+      function startTimer() {
+        stopTimer();
+        timerId = setInterval(() => {
+          if (gameState !== "playing") {
+            stopTimer();
+            return;
+          }
+
+          timeLeft = Math.max(0, timeLeft - 0.1);
+          renderTimer();
+          renderScoresPerMinute();
+
+          if (timeLeft <= 0) {
+            takeDamage();
+          }
+        }, 100);
+      }
+
+      function updateControls() {
+        const isPlaying = gameState === "playing";
+        scoreButton.disabled = !isPlaying;
+        if (gameState === "game-over") {
+          resetButton.textContent = "Play Again";
+        } else if (isPlaying) {
+          resetButton.textContent = "Restart";
+        } else {
+          resetButton.textContent = "Start";
+        }
+      }
+
       function advanceStream() {
-        if (isMoving) {
+        if (gameState !== "playing" || isMoving) {
           return;
         }
 
@@ -455,7 +563,10 @@
         score += 1;
         streak += 1;
         stream.push(randomLetter());
+        resetTimer();
+        setMessage("Nice. Keep the stream moving.");
         renderScores();
+        renderScoresPerMinute();
         renderTrack(true);
 
         requestAnimationFrame(() => {
@@ -474,14 +585,65 @@
         isMoving = false;
       }
 
-      function resetGame() {
+      function takeDamage() {
+        health = Math.max(0, health - 1);
+        streak = 0;
+        renderScores();
+        renderHealth();
+        resetTimer();
+
+        if (health === 0) {
+          endGame();
+          return;
+        }
+
+        setMessage("Time ran out. One health point lost.");
+      }
+
+      function prepareGame() {
+        stopTimer();
         score = 0;
         streak = 0;
+        health = maxHealth;
+        gameState = "ready";
         isMoving = false;
+        startedAt = null;
         track.classList.remove("is-moving");
         buildStream();
+        resetTimer();
         renderScores();
+        renderScoresPerMinute();
+        renderHealth();
         renderTrack(false);
+        setMessage("Press Start to begin.");
+        updateControls();
+      }
+
+      function startGame() {
+        score = 0;
+        streak = 0;
+        health = maxHealth;
+        gameState = "playing";
+        isMoving = false;
+        startedAt = Date.now();
+        track.classList.remove("is-moving");
+        buildStream();
+        resetTimer();
+        renderScores();
+        renderScoresPerMinute();
+        renderHealth();
+        renderTrack(false);
+        setMessage("Go.");
+        updateControls();
+        startTimer();
+      }
+
+      function endGame() {
+        gameState = "game-over";
+        stopTimer();
+        renderScoresPerMinute();
+        setMessage(`Game over. Final score: ${score}.`);
+        updateControls();
       }
 
       async function startWebcam() {
@@ -508,7 +670,7 @@
 
       track.addEventListener("transitionend", finishAdvance);
       scoreButton.addEventListener("click", advanceStream);
-      resetButton.addEventListener("click", resetGame);
+      resetButton.addEventListener("click", startGame);
 
       window.addEventListener("keydown", (event) => {
         if (event.key === scoreKey) {
@@ -517,7 +679,7 @@
         }
       });
 
-      resetGame();
+      prepareGame();
       startWebcam();
     </script>
   </body>
