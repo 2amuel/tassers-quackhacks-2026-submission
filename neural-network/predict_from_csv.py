@@ -74,9 +74,27 @@ def read_landmark_csv(csv_path: Path) -> dict[int, dict[str, dict[int, dict[str,
                 "x": float(row["x"]),
                 "y": float(row["y"]),
                 "z": float(row["z"]),
+                "visibility": parse_optional_float(row.get("visibility")),
+                "presence": parse_optional_float(row.get("presence")),
             }
 
     return samples
+
+
+def parse_optional_float(value: str | None) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def confidence_feature(point: dict[str, float]) -> float:
+    presence = point.get("presence")
+    visibility = point.get("visibility")
+    if presence is not None:
+        return max(0.0, min(float(presence), 1.0))
+    if visibility is not None:
+        return max(0.0, min(float(visibility), 1.0))
+    return 1.0
 
 
 def body_normalization(groups: dict[str, dict[int, dict[str, float]]]) -> tuple[float, float, float]:
@@ -107,7 +125,7 @@ def append_landmarks(
     for index in indices:
         point = landmarks.get(index)
         if point is None:
-            features.extend((0.0, 0.0, 0.0))
+            features.extend((0.0, 0.0, 0.0, 0.0))
             continue
 
         x = point["x"]
@@ -118,7 +136,7 @@ def append_landmarks(
             y = (y - center_y) / scale
             z = z / scale
 
-        features.extend((x, y, z))
+        features.extend((x, y, z, confidence_feature(point)))
 
 
 def sample_to_features(

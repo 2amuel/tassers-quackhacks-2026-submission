@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import importlib.util
 import random
 from dataclasses import dataclass
@@ -53,6 +54,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint-dir", type=Path, default=PROJECT_ROOT / "models")
     parser.add_argument("--checkpoint-name", default="asl_ctc_transformer.pt")
     parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "tensor-cache",
+        help="Directory for cached feature tensors created from landmark CSVs.",
+    )
+    parser.add_argument(
+        "--rebuild-cache",
+        action="store_true",
+        help="Recompute cached feature tensors even when a valid cache file exists.",
+    )
+    parser.add_argument(
         "--device",
         default="cuda" if torch.cuda.is_available() else "cpu",
         help="Torch device. Defaults to cuda when available, otherwise cpu.",
@@ -100,6 +112,15 @@ def read_examples(labels_csv: Path) -> list[Example]:
                     f"Label for {row.get('clip_id', '<unknown>')} contains non-letters: "
                     f"{expected_text!r}"
                 )
+            num_frames = parse_optional_int(row.get("num_frames"))
+            min_timesteps = min_ctc_timesteps(expected_text)
+            if num_frames is not None and num_frames < min_timesteps:
+                print(
+                    f"Skipping {row.get('clip_id', '<unknown>')}: "
+                    f"{num_frames} frames is too short for {expected_text!r} "
+                    f"(needs at least {min_timesteps})"
+                )
+                continue
 
             landmark_csv_path = resolve_path(row["landmark_csv_path"], labels_csv)
             if not landmark_csv_path.exists():
@@ -119,19 +140,91 @@ def read_examples(labels_csv: Path) -> list[Example]:
     return examples
 
 
+def parse_optional_int(value: str | None) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(float(value))
+    except ValueError:
+        return None
+
+
+def min_ctc_timesteps(text: str) -> int:
+    repeated_neighbors = sum(1 for previous, current in zip(text, text[1:]) if previous == current)
+    return len(text) + repeated_neighbors
+
+
+def cache_key(csv_path: Path, normalize_to_body: bool) -> str:
+    resolved = str(csv_path.resolve()).lower()
+    mode = "body" if normalize_to_body else "raw"
+    digest = hashlib.sha1(f"{resolved}|{mode}".encode("utf-8")).hexdigest()
+    return digest[:16]
+
+
+def cache_metadata(csv_path: Path, normalize_to_body: bool) -> dict:
+    stat = csv_path.stat()
+    return {
+        "source_path": str(csv_path.resolve()),
+        "source_mtime_ns": stat.st_mtime_ns,
+        "source_size": stat.st_size,
+        "normalize_to_body": normalize_to_body,
+        "input_features_per_frame": predictor.INPUT_FEATURES_PER_FRAME,
+    }
+
+
+def is_valid_cache(payload: dict, expected_metadata: dict) -> bool:
+    return all(payload.get(key) == value for key, value in expected_metadata.items())
+
+
+def load_or_create_features(
+    csv_path: Path,
+    normalize_to_body: bool,
+    cache_dir: Path | None,
+    rebuild_cache: bool,
+) -> torch.Tensor:
+    if cache_dir is None:
+        return predictor.csv_to_feature_tensor(csv_path, normalize_to_body=normalize_to_body)
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    metadata = cache_metadata(csv_path, normalize_to_body)
+    cache_path = cache_dir / f"{cache_key(csv_path, normalize_to_body)}.pt"
+
+    if cache_path.exists() and not rebuild_cache:
+        try:
+            payload = torch.load(cache_path, map_location="cpu")
+            if isinstance(payload, dict) and is_valid_cache(payload.get("metadata", {}), metadata):
+                return payload["features"]
+        except (OSError, RuntimeError, KeyError, TypeError, ValueError):
+            pass
+
+    features = predictor.csv_to_feature_tensor(csv_path, normalize_to_body=normalize_to_body)
+    torch.save({"metadata": metadata, "features": features}, cache_path)
+    return features
+
+
 class FingerspellingDataset(Dataset):
-    def __init__(self, examples: list[Example], normalize_to_body: bool):
+    def __init__(
+        self,
+        examples: list[Example],
+        normalize_to_body: bool,
+        cache_dir: Path | None,
+        rebuild_cache: bool,
+    ):
         self.examples = examples
         self.normalize_to_body = normalize_to_body
+        self.cache_dir = cache_dir
+        self.rebuild_cache = rebuild_cache
 
     def __len__(self) -> int:
         return len(self.examples)
 
     def __getitem__(self, index: int):
         example = self.examples[index]
-        features = predictor.csv_to_feature_tensor(
+        features = load_or_create_features(
             example.landmark_csv_path,
-            normalize_to_body=self.normalize_to_body,
+            self.normalize_to_body,
+            self.cache_dir,
+            self.rebuild_cache,
         )
         target = torch.tensor(
             [LETTER_TO_CLASS[letter] for letter in example.expected_text],
@@ -249,10 +342,14 @@ def main() -> None:
     train_dataset = FingerspellingDataset(
         train_examples,
         normalize_to_body=not args.no_body_normalize,
+        cache_dir=args.cache_dir,
+        rebuild_cache=args.rebuild_cache,
     )
     val_dataset = FingerspellingDataset(
         val_examples,
         normalize_to_body=not args.no_body_normalize,
+        cache_dir=args.cache_dir,
+        rebuild_cache=args.rebuild_cache,
     )
 
     train_loader = DataLoader(
@@ -285,6 +382,7 @@ def main() -> None:
     print(f"Training examples: {len(train_examples)}")
     print(f"Validation examples: {len(val_examples)}")
     print(f"Device: {args.device}")
+    print(f"Tensor cache: {args.cache_dir}")
 
     for epoch in range(1, args.epochs + 1):
         train_loss = run_epoch(
