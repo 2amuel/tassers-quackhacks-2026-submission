@@ -59,6 +59,12 @@ def parse_args() -> argparse.Namespace:
             "Defaults to half the live 60-frame context window."
         ),
     )
+    parser.add_argument(
+        "--blank-logit-penalty",
+        type=float,
+        default=0.0,
+        help="Subtract this value from the blank class before greedy decoding.",
+    )
     return parser.parse_args()
 
 
@@ -77,6 +83,7 @@ def stream_predict(
     features: torch.Tensor,
     device: str,
     context_delay: int,
+    blank_logit_penalty: float,
 ) -> None:
     frame_tokens: list[int | None] = [None] * features.size(0)
     finalized_until = -1
@@ -87,6 +94,7 @@ def stream_predict(
             window_start = max(0, end_index - SEQUENCE_LENGTH + 1)
             window = predictor.padded_window(features, end_index).unsqueeze(0).to(device)
             log_probs = model(window)[:, 0, :]
+            log_probs = predictor.apply_blank_logit_penalty(log_probs, blank_logit_penalty)
             token_ids = torch.argmax(log_probs, dim=-1).tolist()
 
             padding_count = SEQUENCE_LENGTH - (end_index - window_start + 1)
@@ -128,7 +136,7 @@ def main() -> None:
         normalize_to_body=not args.no_body_normalize,
     )
     model = predictor.load_model(args.checkpoint, args.device)
-    stream_predict(model, features, args.device, args.context_delay)
+    stream_predict(model, features, args.device, args.context_delay, args.blank_logit_penalty)
 
 
 if __name__ == "__main__":
