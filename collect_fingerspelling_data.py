@@ -68,6 +68,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=float, default=20.0, help="Recording and processing FPS.")
     parser.add_argument("--camera", type=int, default=0, help="OpenCV camera index.")
     parser.add_argument("--signer-id", default="unknown", help="Identifier for the signer.")
+    parser.add_argument(
+        "--sequence",
+        default=None,
+        help="Optional custom A-Z target sequence to record instead of generating one.",
+    )
     return parser.parse_args()
 
 
@@ -84,11 +89,29 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--max-len must be greater than or equal to --min-len")
     if args.fps <= 0:
         raise ValueError("--fps must be greater than 0")
+    if args.sequence is not None and not args.sequence.isalpha():
+        raise ValueError("--sequence must contain letters only")
 
 
 def generate_target(min_len: int, max_len: int) -> str:
     length = random.randint(min_len, max_len)
     return "".join(random.choice(string.ascii_uppercase) for _ in range(length))
+
+
+def initial_target(args: argparse.Namespace) -> str:
+    if args.sequence is not None:
+        return args.sequence.upper()
+    return generate_target(args.min_len, args.max_len)
+
+
+def prompt_for_next_target(args: argparse.Namespace) -> str:
+    while True:
+        value = input("Next target sequence, or press Enter for random: ").strip()
+        if value == "":
+            return generate_target(args.min_len, args.max_len)
+        if value.isalpha():
+            return value.upper()
+        print("Target sequence must contain letters only.")
 
 
 def next_clip_number() -> int:
@@ -430,7 +453,7 @@ def prompt_after_recording() -> tuple[str, str]:
     print("Choose next action:")
     print("  a = accept/save recording and generated landmark CSV")
     print("  r = re-record the same target sequence")
-    print("  d = discard and generate a new sequence")
+    print("  d = discard and choose a new sequence")
     print("  q = quit")
 
     while True:
@@ -458,7 +481,7 @@ def collect() -> None:
 
     cap = open_camera(args.camera, args.fps)
     clip_number_value = next_clip_number()
-    target = generate_target(args.min_len, args.max_len)
+    target = initial_target(args)
 
     try:
         while True:
@@ -480,7 +503,7 @@ def collect() -> None:
                 continue
             if action == "d":
                 cleanup_temp(temp_path)
-                target = generate_target(args.min_len, args.max_len)
+                target = prompt_for_next_target(args)
                 continue
             if action == "q":
                 cleanup_temp(temp_path)
@@ -519,7 +542,7 @@ def collect() -> None:
             print(f"Updated {LABELS_CSV}")
 
             clip_number_value += 1
-            target = generate_target(args.min_len, args.max_len)
+            target = prompt_for_next_target(args)
     finally:
         cap.release()
         cv2.destroyAllWindows()
