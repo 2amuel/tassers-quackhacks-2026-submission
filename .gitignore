@@ -13,4 +13,3 @@ outputs/
 *.avi
 data/
 training/data_output
-training/letters
