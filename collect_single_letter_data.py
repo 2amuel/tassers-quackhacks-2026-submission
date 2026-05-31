@@ -61,6 +61,11 @@ def parse_args() -> argparse.Namespace:
         help="Optional number of full A-Z cycles to collect before stopping.",
     )
     parser.add_argument(
+        "--ignore-letters",
+        default="",
+        help="Letters to skip while cycling, e.g. ABC or A,B,C.",
+    )
+    parser.add_argument(
         "--no-preview-overlay",
         action="store_true",
         help="Disable MediaPipe landmark overlays in the live camera preview.",
@@ -71,18 +76,38 @@ def parse_args() -> argparse.Namespace:
 
 def validate_args(args: argparse.Namespace) -> None:
     args.start_letter = args.start_letter.strip().upper()
+    args.ignore_letters = parse_letter_set(args.ignore_letters)
     if args.fps <= 0:
         raise ValueError("--fps must be greater than 0")
     if len(args.start_letter) != 1 or args.start_letter not in string.ascii_uppercase:
         raise ValueError("--start-letter must be one letter from A-Z")
     if args.repetitions is not None and args.repetitions <= 0:
         raise ValueError("--repetitions must be greater than 0")
+    if args.start_letter in args.ignore_letters:
+        raise ValueError("--start-letter cannot also be in --ignore-letters")
+    if len(args.ignore_letters) >= len(string.ascii_uppercase):
+        raise ValueError("--ignore-letters cannot skip every letter")
 
 
-def alphabet_from(start_letter: str) -> list[str]:
+def parse_letter_set(value: str) -> set[str]:
+    separators = {",", " ", "\t", "\n", "\r"}
+    invalid_characters = {
+        character
+        for character in value.upper()
+        if character not in string.ascii_uppercase and character not in separators
+    }
+    if invalid_characters:
+        raise ValueError(f"Invalid --ignore-letters characters: {''.join(sorted(invalid_characters))}")
+
+    letters = {character for character in value.upper() if character in string.ascii_uppercase}
+    return letters
+
+
+def alphabet_from(start_letter: str, ignored_letters: set[str]) -> list[str]:
     letters = list(string.ascii_uppercase)
     start_index = letters.index(start_letter)
-    return letters[start_index:] + letters[:start_index]
+    ordered_letters = letters[start_index:] + letters[:start_index]
+    return [letter for letter in ordered_letters if letter not in ignored_letters]
 
 
 def wait_for_letter_action(
@@ -190,12 +215,14 @@ def collect() -> None:
 
     cap = open_camera(args.camera, args.fps)
     clip_number_value = next_clip_number()
-    letters = alphabet_from(args.start_letter)
+    letters = alphabet_from(args.start_letter, args.ignore_letters)
     preview_started_at = time.monotonic()
     preview_landmarker = None if args.no_preview_overlay else create_holistic_landmarker()
     mirror = not args.no_mirror
     completed_cycles = 0
     saved_clips: list[SavedClip] = []
+    if args.ignore_letters:
+        print(f"Ignoring letters: {''.join(sorted(args.ignore_letters))}")
 
     try:
         while args.repetitions is None or completed_cycles < args.repetitions:
@@ -247,7 +274,7 @@ def collect() -> None:
                     break
 
             completed_cycles += 1
-            letters = list(string.ascii_uppercase)
+            letters = alphabet_from("A", args.ignore_letters)
     finally:
         if preview_landmarker is not None:
             preview_landmarker.close()
