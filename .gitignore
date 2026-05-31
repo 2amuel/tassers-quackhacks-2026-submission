@@ -11,3 +11,6 @@ outputs/
 *.mov
 *.avi
 training/data_output
+sam-letter-data/
+aaryan-letter-data/
+data/
