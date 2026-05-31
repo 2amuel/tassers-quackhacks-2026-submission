@@ -159,7 +159,7 @@ def make_handler(predictor_instance: StreamingPredictor):
                 self.send_json(predictor_instance.status())
                 return
             if path == "/":
-                self.path = "/letter-stream-game-frontend.html"
+                self.path = "/letter-stream-game.html"
             super().do_GET()
 
         def do_POST(self) -> None:

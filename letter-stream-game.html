@@ -524,7 +524,7 @@
           </div>
           <div class="scorebox timer-box">
             <span>Timer</span>
-            <strong id="timer">5.0</strong>
+            <strong id="timer">10.0</strong>
           </div>
           <div class="scorebox">
             <span>Signs/min</span>
@@ -603,7 +603,7 @@
       );
 
       const maxHealth = 3;
-      const timerDuration = 5;
+      const timerDuration = 10;
       let stream = [];
       let score = 0;
       let streak = 0;
@@ -614,7 +614,9 @@
       let timerId = null;
       let startedAt = null;
       let predictionTimerId = null;
+      let predictionLoopActive = false;
       let isPredicting = false;
+      let lastPredictedVideoTime = -1;
       let lastPrediction = null;
       let backendAvailable = false;
       const predictionCanvas = document.createElement("canvas");
@@ -760,9 +762,10 @@
 
       function stopPredictionLoop() {
         if (predictionTimerId) {
-          clearInterval(predictionTimerId);
+          cancelAnimationFrame(predictionTimerId);
           predictionTimerId = null;
         }
+        predictionLoopActive = false;
       }
 
       function startTimer() {
@@ -898,6 +901,8 @@
             setMessage("Backend connected. Add a trained checkpoint for accurate signs.");
           } else if (backendAvailable) {
             startPredictionLoop();
+          } else {
+            setMessage(status.error || "Prediction backend is not ready.");
           }
         } catch (error) {
           backendAvailable = false;
@@ -910,14 +915,12 @@
           return null;
         }
 
-        const width = 224;
-        const height = Math.round(
-          width * (webcamVideo.videoHeight / webcamVideo.videoWidth),
-        );
+        const width = webcamVideo.videoWidth;
+        const height = webcamVideo.videoHeight;
         predictionCanvas.width = width;
         predictionCanvas.height = height;
         predictionContext.drawImage(webcamVideo, 0, 0, width, height);
-        return predictionCanvas.toDataURL("image/jpeg", 0.72);
+        return predictionCanvas.toDataURL("image/jpeg", 0.85);
       }
 
       async function requestPrediction() {
@@ -926,16 +929,28 @@
           isPredicting ||
           webcamVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
         ) {
+          scheduleNextPrediction();
           return;
         }
 
-        const image = captureFrame();
-        if (!image) {
+        if (!webcamVideo.videoWidth || !webcamVideo.videoHeight) {
+          scheduleNextPrediction();
           return;
         }
+
+        if (webcamVideo.currentTime === lastPredictedVideoTime) {
+          scheduleNextPrediction();
+          return;
+        }
+        lastPredictedVideoTime = webcamVideo.currentTime;
 
         isPredicting = true;
         try {
+          const image = captureFrame();
+          if (!image) {
+            return;
+          }
+
           const response = await fetch("/api/predict", {
             method: "POST",
             headers: {
@@ -977,15 +992,26 @@
           setMessage("Prediction backend stopped responding. Manual Score is available.");
         } finally {
           isPredicting = false;
+          scheduleNextPrediction();
         }
       }
 
       function startPredictionLoop() {
-        if (predictionTimerId) {
+        if (predictionLoopActive) {
           return;
         }
+        predictionLoopActive = true;
         requestPrediction();
-        predictionTimerId = setInterval(requestPrediction, 120);
+      }
+
+      function scheduleNextPrediction() {
+        if (!predictionLoopActive || predictionTimerId) {
+          return;
+        }
+        predictionTimerId = requestAnimationFrame(() => {
+          predictionTimerId = null;
+          requestPrediction();
+        });
       }
 
       async function startWebcam() {
