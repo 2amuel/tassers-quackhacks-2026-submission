@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 from elevenlabs.client import ElevenLabs
 from elevenlabs.play import play
@@ -7,9 +6,8 @@ from elevenlabs.play import play
 
 API_KEY = "sk_e5a40034935a1c992d3b42e098f7b07befa48ec841720182"
 API_KEY_ENV_VAR = "ELEVENLABS_API_KEY"
-DEFAULT_VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"
+DEFAULT_VOICE_NAME = "George"
 DEFAULT_MODEL_ID = "eleven_v3"
-OUTPUT_FILE = Path("speech.mp3")
 
 
 def get_api_key():
@@ -23,17 +21,57 @@ def get_api_key():
     return api_key
 
 
-def get_output_file():
-    filename = input(f"Enter output filename [{OUTPUT_FILE.name}]: ").strip()
+def get_voice_name_or_id():
+    voice = input(f"Enter ElevenLabs voice name [{DEFAULT_VOICE_NAME}]: ").strip()
+    return voice or DEFAULT_VOICE_NAME
 
-    if not filename:
-        return OUTPUT_FILE
 
-    output_file = Path(filename)
-    if output_file.suffix == "":
-        output_file = output_file.with_suffix(".mp3")
+def resolve_voice_id(client, voice_name_or_id):
+    voices_response = client.voices.get_all()
+    voices = voices_response.voices
+    search_text = voice_name_or_id.casefold()
 
-    return output_file
+    matching_ids = [
+        voice for voice in voices if voice.voice_id.casefold() == search_text
+    ]
+    if len(matching_ids) == 1:
+        return matching_ids[0].voice_id
+
+    exact_name_matches = [
+        voice for voice in voices if voice.name.casefold() == search_text
+    ]
+
+    if len(exact_name_matches) == 1:
+        return exact_name_matches[0].voice_id
+
+    if len(exact_name_matches) > 1:
+        voice_names = ", ".join(
+            f"{voice.name} ({voice.voice_id})" for voice in exact_name_matches
+        )
+        raise RuntimeError(
+            f"More than one voice is named '{voice_name_or_id}'. Use one of these voice IDs instead: {voice_names}"
+        )
+
+    partial_name_matches = [
+        voice for voice in voices if search_text in voice.name.casefold()
+    ]
+
+    if len(partial_name_matches) == 1:
+        return partial_name_matches[0].voice_id
+
+    if len(partial_name_matches) > 1:
+        voice_names = ", ".join(
+            f"{voice.name} ({voice.voice_id})" for voice in partial_name_matches
+        )
+        raise RuntimeError(
+            f"'{voice_name_or_id}' matched more than one voice. Type more of the name or use a voice ID: {voice_names}"
+        )
+
+    available_voice_names = ", ".join(sorted(voice.name for voice in voices))
+    raise RuntimeError(
+        f"No ElevenLabs voice containing '{voice_name_or_id}' was found.\n"
+        f"Available voices: {available_voice_names}"
+    )
 
 
 def main():
@@ -43,21 +81,19 @@ def main():
         print("No sentence entered. Exiting.")
         return
 
-    output_file = get_output_file()
+    voice_name_or_id = get_voice_name_or_id()
 
     client = ElevenLabs(api_key=get_api_key())
+    voice_id = resolve_voice_id(client, voice_name_or_id)
 
     audio = client.text_to_speech.convert(
         text=sentence,
-        voice_id=DEFAULT_VOICE_ID,
+        voice_id=voice_id,
         model_id=DEFAULT_MODEL_ID,
         output_format="mp3_44100_128",
     )
 
     audio_bytes = b"".join(audio)
-    output_file.write_bytes(audio_bytes)
-    print(f"Saved speech to {output_file.resolve()}")
-
     play(audio_bytes)
 
 
