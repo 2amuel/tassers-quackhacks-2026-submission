@@ -8,9 +8,11 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from data import (
+    FEATURE_NORMALIZATION,
     INPUT_FEATURES_PER_FRAME,
     LetterWindowDataset,
     discover_isolated_letter_examples,
+    read_single_letter_label_examples,
     read_sequence_label_examples,
     split_examples,
 )
@@ -24,6 +26,24 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a sliding-window ASL letter classifier.")
     parser.add_argument("--letter-landmarks-dir", type=Path, default=PROJECT_ROOT / "training" / "letter_landmarks")
+    parser.add_argument(
+        "--data-labels-csv",
+        type=Path,
+        default=PROJECT_ROOT / "data" / "labels.csv",
+        help="Single-letter repo labels.csv to train from. Defaults to data/labels.csv.",
+    )
+    parser.add_argument(
+        "--sam-labels-csv",
+        type=Path,
+        default=PROJECT_ROOT / "sam-letter-data" / "the_data" / "labels.csv",
+        help="Sam letter dataset labels.csv. Defaults to sam-letter-data/the_data/labels.csv.",
+    )
+    parser.add_argument(
+        "--aaryan-labels-csv",
+        type=Path,
+        default=PROJECT_ROOT / "aaryan-letter-data" / "data" / "labels.csv",
+        help="Aaryan letter dataset labels.csv. Defaults to aaryan-letter-data/data/labels.csv.",
+    )
     parser.add_argument(
         "--sequence-labels-csv",
         type=Path,
@@ -47,12 +67,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--jitter-frames", type=int, default=3)
+    parser.add_argument(
+        "--single-letter-window-stride",
+        type=int,
+        default=12,
+        help="Stride in frames for creating multiple windows from long single-letter clips.",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument(
         "--checkpoint",
         type=Path,
         default=None,
-        help="Checkpoint path. Defaults to an isolated-letter checkpoint unless --sequence-labels-csv is used.",
+        help="Checkpoint path. Defaults based on whether labels CSV sources are loaded.",
     )
     parser.add_argument(
         "--reset",
@@ -124,6 +150,12 @@ def load_checkpoint(
             f"but right-hand-only training uses {INPUT_FEATURES_PER_FRAME}. "
             "Use --reset or a different --checkpoint."
         )
+    checkpoint_feature_normalization = payload.get("feature_normalization")
+    if checkpoint_feature_normalization != FEATURE_NORMALIZATION:
+        raise RuntimeError(
+            "Checkpoint uses an older feature normalization. "
+            "Run with --reset or pass a new --checkpoint path."
+        )
 
     model.load_state_dict(payload["model_state_dict"])
     if "optimizer_state_dict" in payload:
@@ -151,6 +183,7 @@ def save_checkpoint(
             "best_val_acc": best_val_acc,
             "window_frames": args.window_frames,
             "input_features_per_frame": INPUT_FEATURES_PER_FRAME,
+            "feature_normalization": FEATURE_NORMALIZATION,
             "letters": LETTERS,
             "args": vars(args),
         },
@@ -161,7 +194,15 @@ def save_checkpoint(
 def main() -> None:
     args = parse_args()
     if args.checkpoint is None:
-        uses_extra_manifest = bool(args.sequence_labels_csv or args.sam_letter_data_dir)
+        default_label_sources = (
+            args.data_labels_csv,
+            args.sam_labels_csv,
+            args.aaryan_labels_csv,
+        )
+        uses_default_labels = any(path is not None and path.exists() for path in default_label_sources)
+        uses_extra_manifest = bool(
+            uses_default_labels or args.sequence_labels_csv or args.sam_letter_data_dir
+        )
         checkpoint_name = (
             "asl_left_hand_letter_window_transformer_sequences.pt"
             if uses_extra_manifest
@@ -174,6 +215,32 @@ def main() -> None:
 
     examples = discover_isolated_letter_examples(args.letter_landmarks_dir)
     print(f"Loaded {len(examples)} isolated letter examples from {args.letter_landmarks_dir}")
+
+    if args.data_labels_csv is not None:
+        if args.data_labels_csv.exists():
+            data_examples = read_single_letter_label_examples(
+                args.data_labels_csv,
+                window_frames=args.window_frames,
+                stride_frames=args.single_letter_window_stride,
+            )
+            print(f"Loaded {len(data_examples)} single-letter data/ examples from {args.data_labels_csv}")
+            examples.extend(data_examples)
+        else:
+            print(f"Skipped missing single-letter data labels CSV: {args.data_labels_csv}")
+
+    default_label_sources = (
+        ("sam-letter-data/", args.sam_labels_csv),
+        ("aaryan-letter-data/", args.aaryan_labels_csv),
+    )
+    for source_name, labels_csv in default_label_sources:
+        if labels_csv is None:
+            continue
+        if labels_csv.exists():
+            data_examples = read_sequence_label_examples(labels_csv)
+            print(f"Loaded {len(data_examples)} {source_name} labels examples from {labels_csv}")
+            examples.extend(data_examples)
+        else:
+            print(f"Skipped missing {source_name} labels CSV: {labels_csv}")
 
     for labels_csv in args.sequence_labels_csv:
         sequence_examples = read_sequence_label_examples(labels_csv)

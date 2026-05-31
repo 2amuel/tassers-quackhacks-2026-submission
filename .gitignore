@@ -10,5 +10,4 @@ outputs/
 *.mp4
 *.mov
 *.avi
-data/
 training/data_output

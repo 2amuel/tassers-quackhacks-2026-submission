@@ -27,11 +27,17 @@ def load_predictor_module():
 
 
 predictor = load_predictor_module()
-HAND_FEATURES_PER_FRAME = predictor.model_module.HAND_FEATURES
+HAND_LANDMARKS = predictor.model_module.HAND_LANDMARKS_PER_HAND
+FEATURES_PER_LANDMARK = predictor.model_module.FEATURES_PER_LANDMARK
+SINGLE_HAND_FEATURES_PER_FRAME = HAND_LANDMARKS * FEATURES_PER_LANDMARK
+ALL_HAND_FEATURES_PER_FRAME = predictor.model_module.HAND_FEATURES
 LEFT_HAND_START = 0
-LEFT_HAND_END = HAND_FEATURES_PER_FRAME
-INPUT_FEATURES_PER_FRAME = HAND_FEATURES_PER_FRAME
+LEFT_HAND_END = SINGLE_HAND_FEATURES_PER_FRAME
+INPUT_FEATURES_PER_FRAME = SINGLE_HAND_FEATURES_PER_FRAME
 LETTER_TO_CLASS = {letter: index for index, letter in enumerate(LETTERS)}
+WRIST_INDEX = 0
+MIDDLE_MCP_INDEX = 9
+FEATURE_NORMALIZATION = "left_hand_wrist_centered_scaled_v1"
 
 
 @dataclass(frozen=True)
@@ -116,6 +122,80 @@ def read_sequence_label_examples(labels_csv: Path) -> list[LetterExample]:
     return examples
 
 
+def read_single_letter_label_examples(
+    labels_csv: Path,
+    window_frames: int,
+    stride_frames: int,
+) -> list[LetterExample]:
+    if not labels_csv.exists():
+        raise FileNotFoundError(f"Could not find labels CSV: {labels_csv}")
+
+    examples: list[LetterExample] = []
+    dataset_name = labels_csv.parent.parent.name if labels_csv.parent.name == "data" else labels_csv.parent.name
+    with labels_csv.open(newline="", encoding="utf-8") as labels_file:
+        reader = csv.DictReader(labels_file)
+        for row in reader:
+            expected_text = row["expected_text"].strip().upper()
+            if len(expected_text) != 1 or expected_text not in LETTER_TO_CLASS:
+                print(
+                    f"Skipping {row.get('clip_id', '<unknown>')}: "
+                    f"expected one A-Z letter, got {expected_text!r}"
+                )
+                continue
+
+            csv_path = resolve_path(row["landmark_csv_path"], labels_csv)
+            if not csv_path.exists():
+                print(f"Skipping {row.get('clip_id', '<unknown>')}: missing {csv_path}")
+                continue
+
+            num_frames = parse_optional_int(row.get("num_frames"))
+            if num_frames is None:
+                features = predictor.csv_to_feature_tensor(csv_path, normalize_to_body=True)
+                num_frames = features.size(0)
+
+            clip_id = f"{dataset_name}/{row.get('clip_id', csv_path.stem)}"
+            examples.extend(
+                single_letter_windows(
+                    clip_id=clip_id,
+                    csv_path=csv_path,
+                    letter=expected_text,
+                    num_frames=num_frames,
+                    window_frames=window_frames,
+                    stride_frames=stride_frames,
+                )
+            )
+    return examples
+
+
+def single_letter_windows(
+    clip_id: str,
+    csv_path: Path,
+    letter: str,
+    num_frames: int,
+    window_frames: int,
+    stride_frames: int,
+) -> list[LetterExample]:
+    if num_frames <= window_frames:
+        return [LetterExample(clip_id=clip_id, csv_path=csv_path, letter=letter)]
+
+    stride_frames = max(1, stride_frames)
+    starts = list(range(0, num_frames - window_frames + 1, stride_frames))
+    final_start = num_frames - window_frames
+    if starts[-1] != final_start:
+        starts.append(final_start)
+
+    return [
+        LetterExample(
+            clip_id=f"{clip_id}:{start_frame}-{start_frame + window_frames}",
+            csv_path=csv_path,
+            letter=letter,
+            start_frame=start_frame,
+            end_frame=start_frame + window_frames,
+        )
+        for start_frame in starts
+    ]
+
+
 def parse_optional_int(value: str | None) -> int | None:
     if value is None or value == "":
         return None
@@ -139,9 +219,44 @@ def left_hand_features(features: torch.Tensor) -> torch.Tensor:
     return features[:, LEFT_HAND_START:LEFT_HAND_END]
 
 
+def normalize_hand_shape_features(features: torch.Tensor) -> torch.Tensor:
+    if features.numel() == 0:
+        return features
+
+    shaped = features.reshape(features.size(0), HAND_LANDMARKS, FEATURES_PER_LANDMARK).clone()
+    coords = shaped[:, :, :3]
+    confidence = shaped[:, :, 3]
+
+    wrist = coords[:, WRIST_INDEX : WRIST_INDEX + 1, :]
+    middle_mcp = coords[:, MIDDLE_MCP_INDEX, :]
+    wrist_point = coords[:, WRIST_INDEX, :]
+    scale = torch.linalg.vector_norm(middle_mcp - wrist_point, dim=-1)
+
+    visible = confidence > 0
+    min_coords = torch.where(
+        visible.unsqueeze(-1),
+        coords,
+        torch.full_like(coords, float("inf")),
+    ).amin(dim=1)
+    max_coords = torch.where(
+        visible.unsqueeze(-1),
+        coords,
+        torch.full_like(coords, float("-inf")),
+    ).amax(dim=1)
+    bbox_scale = torch.linalg.vector_norm(max_coords - min_coords, dim=-1)
+    has_visible_landmarks = visible.any(dim=1)
+    scale = torch.where(scale > 1e-6, scale, bbox_scale)
+    scale = torch.where(has_visible_landmarks, scale.clamp_min(1e-6), torch.ones_like(scale))
+
+    coords = (coords - wrist) / scale.view(-1, 1, 1)
+    coords = torch.where(visible.unsqueeze(-1), coords, torch.zeros_like(coords))
+    shaped[:, :, :3] = coords
+    return shaped.reshape(features.size(0), INPUT_FEATURES_PER_FRAME)
+
+
 def csv_to_feature_tensor(csv_path: Path, normalize_to_body: bool) -> torch.Tensor:
     features = predictor.csv_to_feature_tensor(csv_path, normalize_to_body=normalize_to_body)
-    return left_hand_features(features)
+    return normalize_hand_shape_features(left_hand_features(features))
 
 
 def split_examples(

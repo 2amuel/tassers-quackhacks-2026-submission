@@ -15,22 +15,25 @@ from datetime import datetime
 from pathlib import Path
 
 import cv2
+import mediapipe as mp
 
 from collect_fingerspelling_data import (
     CLIPS_DIR,
     LABELS_CSV,
     LABEL_FIELDNAMES,
+    LANDMARK_FIELDNAMES,
     LANDMARKS_DIR,
     add_preview_overlay,
     append_label,
     cleanup_temp,
     create_holistic_landmarker,
     draw_prompt,
+    draw_tracking_overlay,
     ensure_dirs,
+    holistic_result_to_csv_rows,
     next_clip_number,
     open_camera,
-    record_clip,
-    video_to_landmark_csv,
+    open_video_writer,
 )
 
 
@@ -130,7 +133,8 @@ def wait_for_letter_action(
         if mirror:
             frame = cv2.flip(frame, 1)
 
-        add_preview_overlay(frame, landmarker, preview_started_at)
+        if landmarker is not None:
+            add_preview_overlay(frame, landmarker, preview_started_at)
         undo_text = "u undo last" if last_saved is not None else "u undo unavailable"
         draw_prompt(frame, letter, f"Press s to record. {undo_text}. Press q to quit.")
         cv2.imshow("ASL Fingerspelling Data Collection", frame)
@@ -144,12 +148,99 @@ def wait_for_letter_action(
             return "quit"
 
 
+def next_video_timestamp_ms(preview_started_at: float) -> int:
+    timestamp_ms = int((time.monotonic() - preview_started_at) * 1000)
+    last_timestamp_ms = getattr(add_preview_overlay, "_last_timestamp_ms", -1)
+    if timestamp_ms <= last_timestamp_ms:
+        timestamp_ms = last_timestamp_ms + 1
+    add_preview_overlay._last_timestamp_ms = timestamp_ms
+    return timestamp_ms
+
+
+def record_clip_with_landmarks(
+    cap: cv2.VideoCapture,
+    letter: str,
+    clip_path: Path,
+    fps: float,
+    landmarker,
+    preview_started_at: float,
+    mirror: bool,
+    show_overlay: bool,
+) -> tuple[int, float, list[dict]]:
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
+    writer = open_video_writer(clip_path, fps, width, height)
+
+    landmark_rows: list[dict] = []
+    frame_count = 0
+    frame_interval = 1.0 / fps
+    started_at = time.monotonic()
+    next_frame_at = started_at
+
+    print("Recording. Press e to stop.")
+    try:
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                raise RuntimeError("Webcam frame read failed during recording")
+
+            if mirror:
+                frame = cv2.flip(frame, 1)
+
+            preview = frame.copy()
+            now = time.monotonic()
+            if now >= next_frame_at:
+                writer.write(frame)
+                timestamp_ms = next_video_timestamp_ms(preview_started_at)
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+                result = landmarker.detect_for_video(image, timestamp_ms)
+                landmark_rows.extend(
+                    holistic_result_to_csv_rows(
+                        result,
+                        frame_count,
+                        frame_count,
+                        timestamp_ms,
+                    )
+                )
+                if show_overlay:
+                    draw_tracking_overlay(preview, result)
+
+                frame_count += 1
+                while next_frame_at <= now:
+                    next_frame_at += frame_interval
+            elif show_overlay:
+                add_preview_overlay(preview, landmarker, preview_started_at)
+
+            draw_prompt(preview, letter, "Recording. Press e to stop.")
+            cv2.imshow("ASL Fingerspelling Data Collection", preview)
+
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("e"):
+                break
+    finally:
+        writer.release()
+
+    duration = time.monotonic() - started_at
+    return frame_count, duration, landmark_rows
+
+
+def write_landmark_csv(csv_path: Path, rows: list[dict]) -> None:
+    with csv_path.open("w", newline="", encoding="utf-8") as landmarks_file:
+        writer = csv.DictWriter(landmarks_file, fieldnames=LANDMARK_FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def save_letter_clip(
     temp_path: Path,
     clip_number_value: int,
     letter: str,
     fps: float,
     signer_id: str,
+    num_frames: int,
+    duration_seconds: float,
+    landmark_rows: list[dict],
 ) -> tuple[int, SavedClip]:
     clip_id = f"clip_{clip_number_value:06d}"
     video_path = CLIPS_DIR / f"{clip_id}.mp4"
@@ -161,7 +252,7 @@ def save_letter_clip(
         landmark_csv_path = LANDMARKS_DIR / f"{clip_id}.csv"
 
     temp_path.replace(video_path)
-    num_frames, duration_seconds = video_to_landmark_csv(video_path, landmark_csv_path, fps)
+    write_landmark_csv(landmark_csv_path, landmark_rows)
     append_label(
         {
             "clip_id": clip_id,
@@ -217,7 +308,7 @@ def collect() -> None:
     clip_number_value = next_clip_number()
     letters = alphabet_from(args.start_letter, args.ignore_letters)
     preview_started_at = time.monotonic()
-    preview_landmarker = None if args.no_preview_overlay else create_holistic_landmarker()
+    landmarker = create_holistic_landmarker()
     mirror = not args.no_mirror
     completed_cycles = 0
     saved_clips: list[SavedClip] = []
@@ -234,7 +325,7 @@ def collect() -> None:
                     action = wait_for_letter_action(
                         cap,
                         letter,
-                        preview_landmarker,
+                        None if args.no_preview_overlay else landmarker,
                         preview_started_at,
                         mirror=mirror,
                         last_saved=saved_clips[-1] if saved_clips else None,
@@ -250,14 +341,15 @@ def collect() -> None:
 
                     temp_path = CLIPS_DIR / "_pending_single_letter_clip.mp4"
                     cleanup_temp(temp_path)
-                    recorded_frames, recorded_duration = record_clip(
+                    recorded_frames, recorded_duration, landmark_rows = record_clip_with_landmarks(
                         cap,
                         letter,
                         temp_path,
                         args.fps,
-                        preview_landmarker,
+                        landmarker,
                         preview_started_at,
                         mirror=mirror,
+                        show_overlay=not args.no_preview_overlay,
                     )
                     print(
                         f"Recorded {recorded_frames} frames "
@@ -269,6 +361,9 @@ def collect() -> None:
                         letter,
                         args.fps,
                         args.signer_id,
+                        recorded_frames,
+                        recorded_duration,
+                        landmark_rows,
                     )
                     saved_clips.append(saved_clip)
                     break
@@ -276,8 +371,7 @@ def collect() -> None:
             completed_cycles += 1
             letters = alphabet_from("A", args.ignore_letters)
     finally:
-        if preview_landmarker is not None:
-            preview_landmarker.close()
+        landmarker.close()
         cap.release()
         cv2.destroyAllWindows()
 
