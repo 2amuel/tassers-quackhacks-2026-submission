@@ -18,8 +18,8 @@
         --danger: #d85d4f;
         --border: rgba(246, 244, 236, 0.2);
         --shadow: rgba(4, 7, 5, 0.46);
-        --circle-size: clamp(78px, 12vw, 138px);
-        --gap: clamp(12px, 2.6vw, 36px);
+        --circle-size: clamp(58px, min(12vw, 13vh), 126px);
+        --gap: clamp(8px, min(2.6vw, 3vh), 30px);
         --slot-step: calc(var(--circle-size) + var(--gap));
       }
 
@@ -49,11 +49,12 @@
 
       main {
         width: min(1120px, 100vw);
-        min-height: min(720px, 100vh);
-        padding: clamp(20px, 4vw, 48px);
+        height: 100vh;
+        max-height: 100vh;
+        padding: clamp(10px, 2.4vh, 28px) clamp(14px, 3vw, 40px);
         display: grid;
-        grid-template-rows: auto 1fr auto;
-        gap: clamp(24px, 5vh, 48px);
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        gap: clamp(10px, 2vh, 24px);
       }
 
       .hud {
@@ -70,7 +71,7 @@
 
       h1 {
         margin: 0;
-        font-size: clamp(24px, 4vw, 48px);
+        font-size: clamp(22px, 3.2vw, 40px);
         font-weight: 800;
         line-height: 1;
         text-shadow: 0 0 20px rgba(184, 240, 106, 0.3);
@@ -91,7 +92,7 @@
 
       .scorebox {
         min-width: 112px;
-        padding: 12px 16px;
+        padding: clamp(8px, 1.2vh, 12px) 14px;
         border: 1px solid var(--border);
         border-radius: 8px;
         background: rgba(23, 27, 25, 0.78);
@@ -111,7 +112,7 @@
       .scorebox strong {
         display: block;
         margin-top: 2px;
-        font-size: clamp(24px, 4vw, 42px);
+        font-size: clamp(22px, 3.2vw, 34px);
         line-height: 1;
       }
 
@@ -120,10 +121,11 @@
       }
 
       .stage {
-        align-self: start;
+        min-height: 0;
         display: grid;
         justify-items: center;
-        gap: clamp(64px, 10vh, 112px);
+        align-content: start;
+        gap: clamp(12px, 2.4vh, 28px);
       }
 
       .stream-window {
@@ -131,10 +133,10 @@
           100%,
           calc((var(--circle-size) * 5) + (var(--gap) * 4) + 40px)
         );
-        height: calc(var(--circle-size) + 40px);
+        height: calc(var(--circle-size) + clamp(20px, 3vh, 40px));
         overflow: hidden;
         position: relative;
-        padding: 20px;
+        padding: clamp(10px, 1.5vh, 20px) 20px;
         isolation: isolate;
         z-index: 5;
         mask-image: linear-gradient(
@@ -171,7 +173,7 @@
       .stream-window::after {
         content: "";
         position: absolute;
-        top: 20px;
+        top: clamp(10px, 1.5vh, 20px);
         left: calc(20px + (var(--slot-step) * 2));
         width: var(--circle-size);
         height: var(--circle-size);
@@ -273,7 +275,7 @@
       .play-panel {
         width: min(820px, 100%);
         display: grid;
-        gap: 16px;
+        gap: clamp(8px, 1.4vh, 16px);
         justify-items: center;
         text-align: center;
       }
@@ -288,12 +290,12 @@
 
       .health-panel {
         display: grid;
-        gap: 12px;
+        gap: clamp(8px, 1.3vh, 12px);
         align-content: center;
       }
 
       .health-point {
-        min-height: 74px;
+        min-height: clamp(42px, 8vh, 74px);
         border: 2px solid var(--border);
         border-radius: 8px;
         background:
@@ -314,7 +316,8 @@
 
       .main-letter {
         width: min(100%, 620px);
-        aspect-ratio: 16 / 10;
+        height: min(34vh, 330px);
+        min-height: 190px;
         position: relative;
         overflow: hidden;
         display: grid;
@@ -375,7 +378,7 @@
       }
 
       .game-message {
-        min-height: 24px;
+        min-height: 20px;
         margin: 0;
         color: var(--accent-2);
         font-size: clamp(15px, 1.7vw, 18px);
@@ -421,7 +424,7 @@
         display: flex;
         justify-content: center;
         color: var(--muted);
-        font-size: 14px;
+        font-size: 13px;
       }
 
       kbd {
@@ -443,11 +446,12 @@
 
       @media (max-width: 700px) {
         body {
-          overflow-y: auto;
+          overflow: hidden;
         }
 
         main {
-          min-height: 100vh;
+          height: 100vh;
+          min-height: 0;
         }
 
         .hud {
@@ -457,10 +461,12 @@
 
         .scoreboard {
           width: 100%;
+          flex-wrap: wrap;
         }
 
         .scorebox {
-          flex: 1;
+          flex: 1 1 30%;
+          min-width: 92px;
         }
 
         .camera-row {
@@ -473,7 +479,29 @@
         }
 
         .health-point {
-          min-height: 42px;
+          min-height: 32px;
+        }
+
+        .main-letter {
+          height: min(30vh, 260px);
+          min-height: 160px;
+        }
+      }
+
+      @media (max-height: 720px) {
+        .subtitle,
+        .key-hint,
+        .footer {
+          font-size: 12px;
+        }
+
+        .main-letter {
+          height: min(30vh, 260px);
+          min-height: 150px;
+        }
+
+        button {
+          min-height: 38px;
         }
       }
     </style>
@@ -501,6 +529,10 @@
           <div class="scorebox">
             <span>Signs/min</span>
             <strong id="scoresPerMinute">0</strong>
+          </div>
+          <div class="scorebox">
+            <span>Backend</span>
+            <strong id="backendLetter">-</strong>
           </div>
         </div>
       </header>
@@ -530,11 +562,11 @@
           </div>
           <p class="game-message" id="gameMessage">Press Start to begin.</p>
           <p class="key-hint">
-            Press <kbd>Space</kbd> to score and advance the stream.
+            Match the center letter with your hand sign to advance the stream.
           </p>
           <div class="controls" aria-label="Game controls">
             <button class="score-key" id="scoreButton" type="button">
-              Score
+              Manual Score
             </button>
             <button id="resetButton" type="button">Start</button>
           </div>
@@ -560,6 +592,7 @@
       const streakElement = document.querySelector("#streak");
       const timerElement = document.querySelector("#timer");
       const scoresPerMinuteElement = document.querySelector("#scoresPerMinute");
+      const backendLetterElement = document.querySelector("#backendLetter");
       const scoreButton = document.querySelector("#scoreButton");
       const resetButton = document.querySelector("#resetButton");
       const webcamVideo = document.querySelector("#webcamVideo");
@@ -580,6 +613,14 @@
       let isMoving = false;
       let timerId = null;
       let startedAt = null;
+      let predictionTimerId = null;
+      let isPredicting = false;
+      let lastPrediction = null;
+      let backendAvailable = false;
+      const predictionCanvas = document.createElement("canvas");
+      const predictionContext = predictionCanvas.getContext("2d", {
+        willReadFrequently: true,
+      });
 
       function randomLetter() {
         return ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
@@ -695,6 +736,16 @@
         gameMessage.textContent = message;
       }
 
+      function currentTargetLetter() {
+        return stream[mainIndex]?.letter ?? null;
+      }
+
+      function renderBackendLetter(letter, confidence = 0) {
+        backendLetterElement.textContent = letter
+          ? `${letter}${confidence ? ` ${Math.round(confidence * 100)}%` : ""}`
+          : "-";
+      }
+
       function resetTimer() {
         timeLeft = timerDuration;
         renderTimer();
@@ -704,6 +755,13 @@
         if (timerId) {
           clearInterval(timerId);
           timerId = null;
+        }
+      }
+
+      function stopPredictionLoop() {
+        if (predictionTimerId) {
+          clearInterval(predictionTimerId);
+          predictionTimerId = null;
         }
       }
 
@@ -820,14 +878,109 @@
         setMessage("Go.");
         updateControls();
         startTimer();
+        startPredictionLoop();
       }
 
       function endGame() {
         gameState = "game-over";
         stopTimer();
+        stopPredictionLoop();
         renderScoresPerMinute();
         setMessage(`Game over. Final score: ${score}.`);
         updateControls();
+      }
+
+      async function checkBackend() {
+        try {
+          const response = await fetch("/api/status");
+          const status = await response.json();
+          backendAvailable = Boolean(status.ok);
+          if (backendAvailable && !status.checkpointLoaded) {
+            setMessage("Backend connected. Add a trained checkpoint for accurate signs.");
+          }
+        } catch (error) {
+          backendAvailable = false;
+          setMessage("Backend is not connected. Manual Score is available for testing.");
+        }
+      }
+
+      function captureFrame() {
+        if (!webcamVideo.videoWidth || !webcamVideo.videoHeight) {
+          return null;
+        }
+
+        const width = 320;
+        const height = Math.round(
+          width * (webcamVideo.videoHeight / webcamVideo.videoWidth),
+        );
+        predictionCanvas.width = width;
+        predictionCanvas.height = height;
+        predictionContext.drawImage(webcamVideo, 0, 0, width, height);
+        return predictionCanvas.toDataURL("image/jpeg", 0.72);
+      }
+
+      async function requestPrediction() {
+        if (
+          !backendAvailable ||
+          isPredicting ||
+          gameState !== "playing" ||
+          webcamVideo.readyState < HTMLMediaElement.HAVE_CURRENT_DATA
+        ) {
+          return;
+        }
+
+        const image = captureFrame();
+        if (!image) {
+          return;
+        }
+
+        isPredicting = true;
+        try {
+          const response = await fetch("/api/predict", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ image }),
+          });
+          const prediction = await response.json();
+          if (!prediction.ok) {
+            throw new Error(prediction.error || "Prediction failed.");
+          }
+
+          lastPrediction = prediction;
+          renderBackendLetter(prediction.letter, prediction.confidence);
+
+          if (!prediction.ready) {
+            setMessage("Collecting sign context...");
+            return;
+          }
+
+          const target = currentTargetLetter();
+          if (
+            prediction.letter &&
+            target &&
+            prediction.letter.toUpperCase() === target &&
+            prediction.confidence >= 0.35
+          ) {
+            advanceStream();
+          } else if (prediction.letter) {
+            setMessage(`Backend sees ${prediction.letter}. Target: ${target}.`);
+          }
+        } catch (error) {
+          backendAvailable = false;
+          stopPredictionLoop();
+          renderBackendLetter(null);
+          setMessage("Prediction backend stopped responding. Manual Score is available.");
+        } finally {
+          isPredicting = false;
+        }
+      }
+
+      function startPredictionLoop() {
+        stopPredictionLoop();
+        requestPrediction();
+        predictionTimerId = setInterval(requestPrediction, 450);
       }
 
       async function startWebcam() {
@@ -866,6 +1019,7 @@
 
       prepareGame();
       startWebcam();
+      checkBackend();
     </script>
   </body>
 </html>

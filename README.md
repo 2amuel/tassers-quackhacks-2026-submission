@@ -30,6 +30,17 @@ The scripts use the current MediaPipe Tasks API and download default `.task` mod
 
 ## Run
 
+Serve the SignNinja browser game with the live prediction backend:
+
+```bash
+python game_server.py
+```
+
+Then open http://127.0.0.1:8000. The page sends webcam frames to `/api/predict`
+and advances the stream when the backend prediction matches the center target
+letter. Pass a trained checkpoint with `--checkpoint path/to/model.pt`; without
+one, the server still runs but predictions use random weights.
+
 Capture a five-second clip from the default webcam:
 
 ```bash

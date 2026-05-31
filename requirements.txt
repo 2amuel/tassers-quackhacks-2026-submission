@@ -2,3 +2,4 @@ mediapipe>=0.10.35
 opencv-python>=4.9.0
 matplotlib>=3.8.0
 numpy>=1.26.0
+torch
