@@ -12,3 +12,5 @@ outputs/
 *.mov
 *.avi
 data/
+training/data_output
+training/letters
