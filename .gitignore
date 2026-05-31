@@ -6,9 +6,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .matplotlib-cache/
-models/
 outputs/
 *.mp4
 *.mov
 *.avi
 data/
+training/data_output

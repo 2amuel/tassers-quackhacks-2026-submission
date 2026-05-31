@@ -1,4 +1,4 @@
-"""Record webcam video and save MediaPipe Holistic landmark data."""
+"""Record webcam footage or process an existing video while saving MediaPipe Holistic landmark data."""
 
 from __future__ import annotations
 
@@ -119,6 +119,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--camera", type=int, default=None, help="OpenCV camera index.")
     parser.add_argument(
+        "--input-video",
+        type=Path,
+        default=None,
+        help="Path to an existing video file to process instead of using webcam footage.",
+    )
+    parser.add_argument(
         "--max-duration",
         type=float,
         default=None,
@@ -131,10 +137,16 @@ def parse_args() -> argparse.Namespace:
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
+        "--samples-per-second",
+        type=float,
+        default=12.0,
+        help="Number of sampled images per second used for MediaPipe CSV output.",
+    )
+    parser.add_argument(
         "--sample-interval",
         type=float,
-        default=0.05,
-        help="Seconds between sampled images used for MediaPipe CSV output.",
+        default=None,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument("--width", type=int, default=1280, help="Requested camera frame width.")
     parser.add_argument("--height", type=int, default=720, help="Requested camera frame height.")
@@ -181,19 +193,27 @@ def parse_args() -> argparse.Namespace:
         default=0.5,
         help="Minimum confidence for accepting hand landmarks.",
     )
-    parser.add_argument("--filename", default="webcam_capture.mp4", help="Output video filename.")
+    parser.add_argument("--filename", default=None, help="Output video filename. Defaults to webcam_capture.mp4 or the input video basename.")
     parser.add_argument("--no-save-video", action="store_true", help="Do not save the continuous feed video.")
     parser.add_argument(
         "--no-save-images",
         action="store_true",
         help="Do not save sampled image frames alongside the CSV.",
     )
+    parser.add_argument("--debug-overlay", action="store_true", help="Overlay detected landmark markers onto saved video frames.")
     parser.add_argument("--no-preview", action="store_true", help="Disable the live preview window.")
     parser.add_argument("--no-mirror", action="store_true", help="Do not mirror webcam frames.")
     parser.add_argument("--list-cameras", action="store_true", help="Print detected cameras and exit.")
     args = parser.parse_args()
-    if args.sample_interval <= 0:
-        parser.error("--sample-interval must be greater than 0")
+    if args.sample_interval is not None:
+        if args.sample_interval <= 0:
+            parser.error("--sample-interval must be greater than 0")
+        args.samples_per_second = 1 / args.sample_interval
+    if args.samples_per_second <= 0:
+        parser.error("--samples-per-second must be greater than 0")
+    args.sample_interval = 1 / args.samples_per_second
+    if args.input_video is not None and not args.input_video.exists():
+        parser.error(f"--input-video file not found: {args.input_video}")
     return args
 
 
@@ -497,9 +517,53 @@ def save_landmark_visualization(plot_path: Path, rows: list[dict]) -> None:
         plt.close(fig)
         return
 
-    frame_ids = sorted({int(row["frame"]) for row in rows})
-    frame_id = max(frame_ids, key=lambda value: sum(int(row["frame"]) == value for row in rows))
-    frame_rows = [row for row in rows if int(row["frame"]) == frame_id]
+
+def draw_landmark_overlay(frame, result):
+    overlay = frame.copy()
+    height, width = frame.shape[:2]
+
+    def to_pixel(point):
+        return int(point.x * width), int(point.y * height)
+
+    def draw_connections(landmarks, connections, color):
+        for start, end in connections:
+            if start < len(landmarks) and end < len(landmarks):
+                p1 = landmarks[start]
+                p2 = landmarks[end]
+                if p1 and p2:
+                    cv2.line(overlay, to_pixel(p1), to_pixel(p2), color, 2)
+
+    def draw_points(landmarks, color):
+        for landmark in landmarks:
+            if landmark:
+                cv2.circle(overlay, to_pixel(landmark), 3, color, -1)
+
+    if result.pose_landmarks:
+        draw_connections(result.pose_landmarks, POSE_CONNECTIONS, (0, 255, 0))
+        draw_points(result.pose_landmarks, (0, 255, 0))
+
+    if result.left_hand_landmarks:
+        draw_connections(result.left_hand_landmarks, HAND_CONNECTIONS, (255, 191, 0))
+        draw_points(result.left_hand_landmarks, (255, 191, 0))
+
+    if result.right_hand_landmarks:
+        draw_connections(result.right_hand_landmarks, HAND_CONNECTIONS, (255, 0, 191))
+        draw_points(result.right_hand_landmarks, (255, 0, 191))
+
+    if result.face_landmarks:
+        draw_points(result.face_landmarks, (0, 191, 255))
+
+    cv2.putText(
+        overlay,
+        "DEBUG LANDMARKS",
+        (12, height - 12),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (255, 255, 255),
+        2,
+        cv2.LINE_AA,
+    )
+    return overlay
 
     pose_rows = rows_for_group(frame_rows, "pose")
     pose_world_rows = rows_for_group(frame_rows, "pose_world")
@@ -535,21 +599,159 @@ def save_landmark_visualization(plot_path: Path, rows: list[dict]) -> None:
     plt.close(fig)
 
 
+def process_input_video_landmarks(
+    args: argparse.Namespace,
+    input_video: Path,
+    output_dir: Path,
+    csv_path: Path,
+    visualization_path: Path,
+    holistic_model_path: Path,
+) -> Path:
+    cap = cv2.VideoCapture(str(input_video))
+    if not cap.isOpened():
+        raise RuntimeError(f"Could not open input video file {input_video}")
+
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or args.width
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or args.height
+    fps = cap.get(cv2.CAP_PROP_FPS) or args.fps
+    if fps <= 1:
+        fps = args.fps
+
+    frame_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+    duration_seconds = frame_total / fps if frame_total and fps else None
+    max_duration = args.max_duration
+    if duration_seconds is not None:
+        max_duration = min(max_duration, duration_seconds) if max_duration is not None else duration_seconds
+
+    print(f"Processing input video: {input_video}")
+    print(f"Computing MediaPipe Holistic landmarks directly to {csv_path}")
+
+    start_time = time.monotonic()
+    sample_count = 0
+    landmark_rows: list[dict] = []
+
+    try:
+        with (
+            csv_path.open("w", newline="", encoding="utf-8") as csv_file,
+            create_holistic_landmarker(holistic_model_path, args) as landmarker,
+        ):
+            csv_writer = csv.DictWriter(csv_file, fieldnames=LANDMARK_FIELDNAMES)
+            csv_writer.writeheader()
+            csv_file.flush()
+
+            sample_time = 0.0
+            while max_duration is None or sample_time < max_duration:
+                cap.set(cv2.CAP_PROP_POS_MSEC, sample_time * 1000)
+                ok, frame = cap.read()
+                if not ok:
+                    break
+
+                frame_index = int(cap.get(cv2.CAP_PROP_POS_FRAMES)) - 1
+                if frame_index < 0:
+                    frame_index = int(round(sample_time * fps))
+
+                timestamp_ms = int(round(sample_time * 1000))
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+                result = landmarker.detect_for_video(image, timestamp_ms)
+
+                sampled_rows = holistic_result_to_csv_rows(
+                    result,
+                    frame_index,
+                    sample_count,
+                    timestamp_ms,
+                )
+                csv_writer.writerows(sampled_rows)
+                csv_file.flush()
+                landmark_rows.extend(sampled_rows)
+
+                sample_count += 1
+                sample_time = sample_count * args.sample_interval
+    finally:
+        cap.release()
+
+    save_landmark_visualization(visualization_path, landmark_rows)
+
+    metadata = {
+        "source": {"type": "video", "input_path": str(input_video)},
+        "runtime_seconds": time.monotonic() - start_time,
+        "max_duration_seconds": args.max_duration,
+        "samples_per_second": args.samples_per_second,
+        "sample_interval_seconds": args.sample_interval,
+        "frame_count": frame_total,
+        "sample_count": sample_count,
+        "fps": fps,
+        "width": width,
+        "height": height,
+        "video_path": None,
+        "sampled_frames_dir": None,
+        "landmark_csv_path": str(csv_path),
+        "landmark_visualization_path": str(visualization_path),
+        "holistic_model_path": str(holistic_model_path),
+        "landmark_groups": [
+            "pose_world",
+            "pose",
+            "left_hand",
+            "left_hand_world",
+            "right_hand",
+            "right_hand_world",
+            "face",
+        ],
+    }
+    with (output_dir / "recording_metadata.json").open("w", encoding="utf-8") as metadata_file:
+        json.dump(metadata, metadata_file, indent=2)
+
+    print(f"Processed {sample_count} sampled video frames")
+    print(f"Wrote {len(landmark_rows)} landmark rows to {csv_path}")
+    print(f"Wrote landmark visualization to {visualization_path}")
+    return csv_path
+
+
 def record() -> Path:
     args = parse_args()
-    camera = choose_camera(args)
+    input_video = args.input_video
+    if input_video is not None:
+        args.no_preview = True
+        args.no_save_video = True
+        args.no_save_images = True
+        args.no_mirror = True
+
     output_dir = make_output_dir(args.output_dir)
-    output_path = output_dir / args.filename
+    output_filename = args.filename
+    if output_filename is None:
+        if input_video is not None:
+            output_filename = f"{input_video.stem}.mp4"
+        else:
+            output_filename = "webcam_capture.mp4"
+    output_path = output_dir / output_filename
     csv_path = output_dir / "holistic_landmarks.csv"
     visualization_path = output_dir / "landmark_visualization.png"
     sampled_frames_dir = output_dir / "sampled_frames"
     holistic_model_path = ensure_holistic_model(args.holistic_model_path)
+    if input_video is not None:
+        return process_input_video_landmarks(
+            args,
+            input_video,
+            output_dir,
+            csv_path,
+            visualization_path,
+            holistic_model_path,
+        )
+
     if not args.no_save_images:
         sampled_frames_dir.mkdir(exist_ok=True)
 
-    cap = cv2.VideoCapture(camera.index, camera_backend())
-    if not cap.isOpened():
-        raise RuntimeError(f"Could not open webcam at camera index {camera.index} ({camera.name})")
+    if input_video is not None:
+        cap = cv2.VideoCapture(str(input_video))
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open input video file {input_video}")
+        source_name = str(input_video)
+    else:
+        camera = choose_camera(args)
+        cap = cv2.VideoCapture(camera.index, camera_backend())
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open webcam at camera index {camera.index} ({camera.name})")
+        source_name = camera.name
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
@@ -567,9 +769,14 @@ def record() -> Path:
     sample_count = 0
     next_sample_time = 0.0
     landmark_rows: list[dict] = []
+    result = None
 
-    print(f"Recording camera {camera.index}: {camera.name}")
-    print("Press q in the preview window, or Ctrl-C in the terminal, to stop.")
+    if input_video is not None:
+        print(f"Processing input video: {input_video}")
+        print("Input video mode: no preview or output video will be saved, only landmarks CSV is generated.")
+    else:
+        print(f"Recording camera {camera.index}: {camera.name}")
+        print("Press q in the preview window, or Ctrl-C in the terminal, to stop.")
     if writer is not None:
         print(f"Saving video feed to {output_path}")
     if not args.no_save_images:
@@ -586,26 +793,36 @@ def record() -> Path:
             csv_file.flush()
 
             while True:
-                elapsed = time.monotonic() - start_time
-                if args.max_duration is not None and elapsed >= args.max_duration:
-                    break
-
                 ok, frame = cap.read()
                 if not ok:
                     print("Camera frame read failed; stopping recording.")
                     break
 
+                if input_video is not None:
+                    elapsed = cap.get(cv2.CAP_PROP_POS_MSEC) / 1000.0
+                else:
+                    elapsed = time.monotonic() - start_time
+
+                if args.max_duration is not None and elapsed >= args.max_duration:
+                    break
+
                 if not args.no_mirror:
                     frame = cv2.flip(frame, 1)
+
+                timestamp_ms = int(elapsed * 1000)
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+
+                if args.debug_overlay or elapsed >= next_sample_time:
+                    result = landmarker.detect_for_video(image, timestamp_ms)
+
+                if args.debug_overlay and result is not None:
+                    frame = draw_landmark_overlay(frame, result)
 
                 if writer is not None:
                     writer.write(frame)
 
                 if elapsed >= next_sample_time:
-                    timestamp_ms = int(elapsed * 1000)
-                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
-                    result = landmarker.detect_for_video(image, timestamp_ms)
                     sampled_rows = holistic_result_to_csv_rows(
                         result,
                         frame_count,
@@ -641,10 +858,16 @@ def record() -> Path:
 
     save_landmark_visualization(visualization_path, landmark_rows)
 
+    source_info = (
+        {"type": "video", "input_path": str(input_video)}
+        if input_video is not None
+        else {"type": "webcam", "camera": asdict(camera)}
+    )
     metadata = {
-        "camera": asdict(camera),
+        "source": source_info,
         "runtime_seconds": time.monotonic() - start_time,
         "max_duration_seconds": args.max_duration,
+        "samples_per_second": args.samples_per_second,
         "sample_interval_seconds": args.sample_interval,
         "frame_count": frame_count,
         "sample_count": sample_count,
