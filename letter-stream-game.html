@@ -3,21 +3,21 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SignMasters</title>
+    <title>SignNinja</title>
     <style>
       :root {
         color-scheme: dark;
-        --bg: #162016;
-        --panel: rgba(34, 45, 31, 0.84);
-        --panel-strong: rgba(72, 58, 35, 0.92);
-        --ink: #fff7e6;
-        --muted: #d9dcc8;
-        --accent: #9fcb69;
-        --accent-2: #f0c46c;
-        --main: #cde8a3;
+        --bg: #2f3432;
+        --panel: rgba(23, 27, 25, 0.86);
+        --panel-strong: rgba(38, 43, 40, 0.94);
+        --ink: #f6f4ec;
+        --muted: #c5cbc2;
+        --accent: #b8f06a;
+        --accent-2: #e6d06f;
+        --main: #d9f7a3;
         --danger: #d85d4f;
-        --border: rgba(255, 247, 230, 0.2);
-        --shadow: rgba(10, 17, 9, 0.4);
+        --border: rgba(246, 244, 236, 0.2);
+        --shadow: rgba(4, 7, 5, 0.46);
         --circle-size: clamp(78px, 12vw, 138px);
         --gap: clamp(12px, 2.6vw, 36px);
         --slot-step: calc(var(--circle-size) + var(--gap));
@@ -33,7 +33,9 @@
         display: grid;
         place-items: center;
         overflow: hidden;
-        background: #1d2b20;
+        background:
+          radial-gradient(circle at 50% -10%, rgba(184, 240, 106, 0.14), transparent 32rem),
+          var(--bg);
         color: var(--ink);
         font-family:
           Inter,
@@ -71,6 +73,7 @@
         font-size: clamp(24px, 4vw, 48px);
         font-weight: 800;
         line-height: 1;
+        text-shadow: 0 0 20px rgba(184, 240, 106, 0.3);
       }
 
       .subtitle,
@@ -91,7 +94,7 @@
         padding: 12px 16px;
         border: 1px solid var(--border);
         border-radius: 8px;
-        background: rgba(28, 39, 24, 0.78);
+        background: rgba(23, 27, 25, 0.78);
         box-shadow: 0 16px 40px var(--shadow);
         backdrop-filter: blur(8px);
       }
@@ -134,6 +137,20 @@
         padding: 20px;
         isolation: isolate;
         z-index: 5;
+        mask-image: linear-gradient(
+          90deg,
+          transparent 0,
+          #000 34px,
+          #000 calc(100% - 34px),
+          transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+          90deg,
+          transparent 0,
+          #000 34px,
+          #000 calc(100% - 34px),
+          transparent 100%
+        );
       }
 
       .stream-window::before {
@@ -143,9 +160,9 @@
         border-radius: 999px;
         background: linear-gradient(
           90deg,
-          rgba(18, 28, 15, 0.82),
-          rgba(255, 247, 230, 0.08),
-          rgba(18, 28, 15, 0.82)
+          rgba(10, 13, 12, 0.9),
+          rgba(184, 240, 106, 0.08),
+          rgba(10, 13, 12, 0.9)
         );
         opacity: 0.9;
         z-index: -1;
@@ -158,12 +175,12 @@
         left: calc(20px + (var(--slot-step) * 2));
         width: var(--circle-size);
         height: var(--circle-size);
-        border: 4px solid rgba(240, 196, 108, 0.92);
+        border: 4px solid rgba(184, 240, 106, 0.92);
         border-radius: 50%;
         box-shadow:
-          0 0 0 7px rgba(159, 203, 105, 0.18),
-          0 0 30px rgba(240, 196, 108, 0.72),
-          0 18px 48px rgba(10, 17, 9, 0.44);
+          0 0 0 7px rgba(20, 24, 21, 0.46),
+          0 0 30px rgba(184, 240, 106, 0.7),
+          0 18px 48px rgba(4, 7, 5, 0.52);
         pointer-events: none;
         z-index: 4;
       }
@@ -188,13 +205,13 @@
         flex: 0 0 var(--circle-size);
         display: grid;
         place-items: center;
-        border: 3px solid rgba(255, 247, 230, 0.26);
+        border: 3px solid rgba(246, 244, 236, 0.24);
         border-radius: 50%;
         background:
           linear-gradient(
             150deg,
-            rgba(255, 247, 230, 0.18),
-            rgba(255, 247, 230, 0.04)
+            rgba(246, 244, 236, 0.16),
+            rgba(184, 240, 106, 0.06)
           ),
           var(--panel);
         color: var(--ink);
@@ -204,7 +221,7 @@
         text-transform: uppercase;
         text-shadow: 0 5px 18px rgba(0, 0, 0, 0.38);
         box-shadow:
-          inset 0 1px 0 rgba(255, 247, 230, 0.24),
+          inset 0 1px 0 rgba(246, 244, 236, 0.22),
           0 18px 42px var(--shadow);
         transform: scale(0.92);
         transition: transform 180ms ease;
@@ -215,6 +232,42 @@
         position: relative;
         z-index: 3;
         transform: scale(1);
+      }
+
+      .letter-circle.cracked {
+        overflow: hidden;
+      }
+
+      .letter-circle.cracked::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 116%;
+        height: 5px;
+        border-radius: 999px;
+        background:
+          linear-gradient(90deg, transparent, rgba(5, 7, 6, 0.96) 12%, rgba(184, 240, 106, 0.9) 50%, rgba(5, 7, 6, 0.96) 88%, transparent);
+        box-shadow: 0 0 14px rgba(184, 240, 106, 0.34);
+        transform: translate(-50%, -50%) rotate(var(--crack-angle));
+        z-index: 4;
+      }
+
+      .letter-half {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+      }
+
+      .letter-half.upper {
+        clip-path: inset(0 0 50% 0);
+        transform: translate(var(--crack-upper-x), var(--crack-upper-y));
+      }
+
+      .letter-half.lower {
+        clip-path: inset(50% 0 0 0);
+        transform: translate(var(--crack-lower-x), var(--crack-lower-y));
       }
 
       .play-panel {
@@ -429,7 +482,7 @@
     <main>
       <header class="hud" aria-label="Game status">
         <div class="title">
-          <h1>SignMasters</h1>
+          <h1>SignNinja</h1>
           <p class="subtitle">Sign the main letter to move forward!</p>
         </div>
         <div class="scoreboard">
@@ -452,7 +505,7 @@
         </div>
       </header>
 
-      <section class="stage" aria-label="SignMasters game">
+      <section class="stage" aria-label="SignNinja game">
         <div class="stream-window" aria-live="polite">
           <div class="circle-track" id="circleTrack"></div>
         </div>
@@ -532,14 +585,56 @@
         return ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
       }
 
+      function createStreamEntry() {
+        return {
+          letter: randomLetter(),
+          crack: null,
+        };
+      }
+
+      function createCrackData() {
+        const angle = Math.floor(Math.random() * 140) - 70;
+        const radians = ((angle + 90) * Math.PI) / 180;
+        const distance = 9;
+
+        return {
+          angle,
+          upperX: Math.cos(radians) * distance,
+          upperY: Math.sin(radians) * distance,
+        };
+      }
+
       function buildStream(length = 8) {
-        stream = Array.from({ length }, randomLetter);
+        stream = Array.from({ length }, createStreamEntry);
       }
 
       function ensureStreamLength() {
         while (stream.length < visibleCount + 2) {
-          stream.push(randomLetter());
+          stream.push(createStreamEntry());
         }
+      }
+
+      function crackCircle(circle, entry) {
+        circle.classList.add("cracked");
+        circle.style.setProperty("--crack-angle", `${entry.crack.angle}deg`);
+        circle.style.setProperty("--crack-upper-x", `${entry.crack.upperX}px`);
+        circle.style.setProperty("--crack-upper-y", `${entry.crack.upperY}px`);
+        circle.style.setProperty("--crack-lower-x", `${-entry.crack.upperX}px`);
+        circle.style.setProperty("--crack-lower-y", `${-entry.crack.upperY}px`);
+        circle.setAttribute(
+          "aria-label",
+          `${entry.letter}, cracked previous letter`,
+        );
+
+        const upperHalf = document.createElement("span");
+        upperHalf.className = "letter-half upper";
+        upperHalf.textContent = entry.letter;
+
+        const lowerHalf = document.createElement("span");
+        lowerHalf.className = "letter-half lower";
+        lowerHalf.textContent = entry.letter;
+
+        circle.replaceChildren(upperHalf, lowerHalf);
       }
 
       function renderTrack(includeIncoming = false) {
@@ -551,15 +646,19 @@
         track.innerHTML = "";
         const activeIndex = includeIncoming ? mainIndex + 1 : mainIndex;
 
-        letters.forEach((letter, index) => {
+        letters.forEach((entry, index) => {
           const circle = document.createElement("div");
           circle.className =
             index === activeIndex ? "letter-circle main" : "letter-circle";
-          circle.textContent = letter;
-          circle.setAttribute(
-            "aria-label",
-            index === activeIndex ? `${letter}, main circle` : letter,
-          );
+          if (entry.crack) {
+            crackCircle(circle, entry);
+          } else {
+            circle.textContent = entry.letter;
+            circle.setAttribute(
+              "aria-label",
+              index === activeIndex ? `${entry.letter}, main circle` : entry.letter,
+            );
+          }
           track.append(circle);
         });
       }
@@ -646,7 +745,8 @@
         isMoving = true;
         score += 1;
         streak += 1;
-        stream.push(randomLetter());
+        stream[mainIndex].crack = createCrackData();
+        stream.push(createStreamEntry());
         resetTimer();
         setMessage("Nice. Keep the stream moving.");
         renderScores();
