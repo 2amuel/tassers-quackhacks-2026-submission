@@ -9,6 +9,8 @@ import torch
 
 
 MODEL_FILE = Path(__file__).with_name("neural-network.py")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_CHECKPOINT = PROJECT_ROOT / "models" / "best_asl_ctc_transformer.pt"
 
 
 def load_model_module():
@@ -36,8 +38,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=None,
-        help="Optional PyTorch model checkpoint. If omitted, predictions use random weights.",
+        default=DEFAULT_CHECKPOINT,
+        help=f"PyTorch model checkpoint. Defaults to {DEFAULT_CHECKPOINT}.",
     )
     parser.add_argument(
         "--device",
@@ -53,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         "--sliding-window",
         action="store_true",
         help="Use 60-frame sliding windows instead of running the full CSV sequence at once.",
+    )
+    parser.add_argument(
+        "--blank-logit-penalty",
+        type=float,
+        default=0.0,
+        help="Subtract this value from the blank class before greedy decoding.",
     )
     return parser.parse_args()
 
@@ -202,16 +210,24 @@ def csv_to_feature_tensor(csv_path: Path, normalize_to_body: bool) -> torch.Tens
     return torch.tensor(frames, dtype=torch.float32)
 
 
-def load_model(checkpoint: Path | None, device: str) -> torch.nn.Module:
-    model = model_module.create_model().to(device)
-    model.eval()
+def load_model(checkpoint: Path, device: str) -> torch.nn.Module:
+    if not checkpoint.exists():
+        raise FileNotFoundError(
+            f"Could not find model checkpoint: {checkpoint}. "
+            "Train first with train_ctc.py or pass --checkpoint."
+        )
 
-    if checkpoint is None:
-        print("Warning: no checkpoint supplied; predictions will use random weights.")
-        return model
-
-    payload = torch.load(checkpoint, map_location=device)
+    payload = torch.load(checkpoint, map_location=device, weights_only=False)
     state_dict = payload["model_state_dict"] if "model_state_dict" in payload else payload
+
+    max_sequence_length = SEQUENCE_LENGTH
+    if isinstance(state_dict, dict) and "position.pe" in state_dict:
+        position_pe = state_dict["position.pe"]
+        if isinstance(position_pe, torch.Tensor):
+            max_sequence_length = position_pe.size(1)
+
+    model = model_module.create_model(max_sequence_length=max_sequence_length).to(device)
+    model.eval()
     model.load_state_dict(state_dict)
     return model
 
@@ -228,9 +244,26 @@ def ctc_collapse(class_ids: list[int]) -> str:
     return "".join(decoded)
 
 
-def ctc_greedy_decode(log_probs: torch.Tensor) -> str:
+def apply_blank_logit_penalty(log_probs: torch.Tensor, penalty: float) -> torch.Tensor:
+    if penalty <= 0.0:
+        return log_probs
+
+    adjusted = log_probs.clone()
+    adjusted[..., 0] -= penalty
+    return adjusted
+
+
+def ctc_greedy_decode(log_probs: torch.Tensor, blank_logit_penalty: float = 0.0) -> str:
+    log_probs = apply_blank_logit_penalty(log_probs, blank_logit_penalty)
     class_ids = torch.argmax(log_probs, dim=-1).tolist()
     return ctc_collapse(class_ids)
+
+
+def blank_margin_summary(log_probs: torch.Tensor) -> tuple[float, float]:
+    blank_scores = log_probs[..., 0]
+    best_letter_scores = log_probs[..., 1:].max(dim=-1).values
+    margins = blank_scores - best_letter_scores
+    return float(margins.mean().item()), float(margins.max().item())
 
 
 def padded_window(features: torch.Tensor, end_index: int) -> torch.Tensor:
@@ -248,7 +281,12 @@ def padded_window(features: torch.Tensor, end_index: int) -> torch.Tensor:
     return window
 
 
-def predict_sliding_windows(model: torch.nn.Module, features: torch.Tensor, device: str) -> str:
+def predict_sliding_windows(
+    model: torch.nn.Module,
+    features: torch.Tensor,
+    device: str,
+    blank_logit_penalty: float,
+) -> str:
     predicted_path: list[int] = []
 
     print("sample,frame_token")
@@ -257,7 +295,10 @@ def predict_sliding_windows(model: torch.nn.Module, features: torch.Tensor, devi
             window = padded_window(features, end_index).unsqueeze(0).to(device)
             log_probs = model(window)
 
-            newest_frame_log_probs = log_probs[-1, 0, :]
+            newest_frame_log_probs = apply_blank_logit_penalty(
+                log_probs[-1, 0, :],
+                blank_logit_penalty,
+            )
             frame_token_id = int(torch.argmax(newest_frame_log_probs).item())
             predicted_path.append(frame_token_id)
 
@@ -267,11 +308,20 @@ def predict_sliding_windows(model: torch.nn.Module, features: torch.Tensor, devi
     return ctc_collapse(predicted_path)
 
 
-def predict_full_sequence(model: torch.nn.Module, features: torch.Tensor, device: str) -> str:
+def predict_full_sequence(
+    model: torch.nn.Module,
+    features: torch.Tensor,
+    device: str,
+    blank_logit_penalty: float,
+) -> str:
     print("sample,frame_token")
     with torch.no_grad():
         batch = features.unsqueeze(0).to(device)
         log_probs = model(batch)[:, 0, :]
+        mean_blank_margin, max_blank_margin = blank_margin_summary(log_probs)
+        print(f"blank_margin_mean,{mean_blank_margin:.4f}")
+        print(f"blank_margin_max,{max_blank_margin:.4f}")
+        log_probs = apply_blank_logit_penalty(log_probs, blank_logit_penalty)
         predicted_path = torch.argmax(log_probs, dim=-1).tolist()
 
     for sample_index, token_id in enumerate(predicted_path):
@@ -288,9 +338,9 @@ def main() -> None:
     )
     model = load_model(args.checkpoint, args.device)
     if args.sliding_window:
-        prediction = predict_sliding_windows(model, features, args.device)
+        prediction = predict_sliding_windows(model, features, args.device, args.blank_logit_penalty)
     else:
-        prediction = predict_full_sequence(model, features, args.device)
+        prediction = predict_full_sequence(model, features, args.device, args.blank_logit_penalty)
     print()
     print(f"final_prediction,{prediction}")
 
