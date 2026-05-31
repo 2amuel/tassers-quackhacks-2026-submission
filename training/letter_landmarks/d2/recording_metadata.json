@@ -1,21 +1,21 @@
 {
   "source": {
     "type": "video",
-    "input_path": "/Users/tristan/Quackhacks/tassers-quackhacks-2026-submission/training/letters/d2.mp4"
+    "input_path": "training/letters/d2.mp4"
   },
-  "runtime_seconds": 0.9283687500283122,
+  "runtime_seconds": 4.737539666995872,
   "max_duration_seconds": null,
   "samples_per_second": 12.0,
   "sample_interval_seconds": 0.08333333333333333,
-  "frame_count": 19,
-  "sample_count": 12,
+  "frame_count": 83,
+  "sample_count": 50,
   "fps": 20.0,
   "width": 1920,
   "height": 1080,
   "video_path": null,
   "sampled_frames_dir": null,
-  "landmark_csv_path": "/Users/tristan/Quackhacks/tassers-quackhacks-2026-submission/training/data_output/letter_landmarks/d2/holistic_landmarks.csv",
-  "landmark_visualization_path": "/Users/tristan/Quackhacks/tassers-quackhacks-2026-submission/training/data_output/letter_landmarks/d2/landmark_visualization.png",
+  "landmark_csv_path": "training/letter_landmarks/d2/holistic_landmarks.csv",
+  "landmark_visualization_path": "training/letter_landmarks/d2/landmark_visualization.png",
   "holistic_model_path": "models/holistic_landmarker.task",
   "landmark_groups": [
     "pose_world",
