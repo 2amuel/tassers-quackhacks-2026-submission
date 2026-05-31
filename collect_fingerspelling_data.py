@@ -58,6 +58,68 @@ LANDMARK_FIELDNAMES = [
     "presence",
 ]
 
+POSE_CONNECTIONS = (
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 7),
+    (0, 4),
+    (4, 5),
+    (5, 6),
+    (6, 8),
+    (9, 10),
+    (11, 12),
+    (11, 13),
+    (13, 15),
+    (15, 17),
+    (15, 19),
+    (15, 21),
+    (17, 19),
+    (12, 14),
+    (14, 16),
+    (16, 18),
+    (16, 20),
+    (16, 22),
+    (18, 20),
+    (11, 23),
+    (12, 24),
+    (23, 24),
+    (23, 25),
+    (24, 26),
+    (25, 27),
+    (26, 28),
+    (27, 29),
+    (28, 30),
+    (29, 31),
+    (30, 32),
+    (27, 31),
+    (28, 32),
+)
+
+HAND_CONNECTIONS = (
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
+    (0, 5),
+    (5, 6),
+    (6, 7),
+    (7, 8),
+    (5, 9),
+    (9, 10),
+    (10, 11),
+    (11, 12),
+    (9, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+    (13, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+    (0, 17),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -73,6 +135,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Optional custom A-Z target sequence to record instead of generating one.",
     )
+    parser.add_argument(
+        "--no-preview-overlay",
+        action="store_true",
+        help="Disable MediaPipe landmark overlays in the live camera preview.",
+    )
+    parser.add_argument("--no-mirror", action="store_true", help="Do not mirror webcam frames.")
     return parser.parse_args()
 
 
@@ -184,7 +252,96 @@ def draw_prompt(frame, text: str, status: str) -> None:
     )
 
 
-def wait_for_start(cap: cv2.VideoCapture, target: str) -> bool:
+def pixel_point(landmark, width: int, height: int) -> tuple[int, int]:
+    return (
+        int(round(landmark.x * width)),
+        int(round(landmark.y * height)),
+    )
+
+
+def draw_connections(
+    frame,
+    landmarks,
+    connections: tuple[tuple[int, int], ...],
+    color: tuple[int, int, int],
+    thickness: int,
+) -> None:
+    height, width = frame.shape[:2]
+    for start_index, end_index in connections:
+        if start_index >= len(landmarks) or end_index >= len(landmarks):
+            continue
+        cv2.line(
+            frame,
+            pixel_point(landmarks[start_index], width, height),
+            pixel_point(landmarks[end_index], width, height),
+            color,
+            thickness,
+            cv2.LINE_AA,
+        )
+
+
+def draw_landmark_points(
+    frame,
+    landmarks,
+    color: tuple[int, int, int],
+    radius: int,
+) -> None:
+    height, width = frame.shape[:2]
+    for landmark in landmarks:
+        cv2.circle(
+            frame,
+            pixel_point(landmark, width, height),
+            radius,
+            color,
+            -1,
+            cv2.LINE_AA,
+        )
+
+
+def draw_tracking_overlay(frame, result) -> None:
+    if result.face_landmarks:
+        draw_landmark_points(frame, result.face_landmarks, (120, 120, 120), 1)
+
+    if result.pose_landmarks:
+        draw_connections(frame, result.pose_landmarks, POSE_CONNECTIONS, (245, 117, 66), 3)
+        draw_landmark_points(frame, result.pose_landmarks, (66, 135, 245), 4)
+
+    if result.left_hand_landmarks:
+        draw_connections(frame, result.left_hand_landmarks, HAND_CONNECTIONS, (0, 180, 255), 2)
+        draw_landmark_points(frame, result.left_hand_landmarks, (0, 140, 255), 4)
+
+    if result.right_hand_landmarks:
+        draw_connections(frame, result.right_hand_landmarks, HAND_CONNECTIONS, (255, 70, 180), 2)
+        draw_landmark_points(frame, result.right_hand_landmarks, (255, 40, 140), 4)
+
+
+def add_preview_overlay(
+    frame,
+    landmarker: vision.HolisticLandmarker | None,
+    preview_started_at: float,
+) -> None:
+    if landmarker is None:
+        return
+
+    timestamp_ms = int((time.monotonic() - preview_started_at) * 1000)
+    last_timestamp_ms = getattr(add_preview_overlay, "_last_timestamp_ms", -1)
+    if timestamp_ms <= last_timestamp_ms:
+        timestamp_ms = last_timestamp_ms + 1
+    add_preview_overlay._last_timestamp_ms = timestamp_ms
+
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
+    result = landmarker.detect_for_video(image, timestamp_ms)
+    draw_tracking_overlay(frame, result)
+
+
+def wait_for_start(
+    cap: cv2.VideoCapture,
+    target: str,
+    landmarker: vision.HolisticLandmarker | None,
+    preview_started_at: float,
+    mirror: bool,
+) -> bool:
     print()
     print(f"Target sequence: {target}")
     print("Press s in the preview window to start recording, or q to quit.")
@@ -194,6 +351,10 @@ def wait_for_start(cap: cv2.VideoCapture, target: str) -> bool:
         if not ok:
             raise RuntimeError("Webcam frame read failed before recording started")
 
+        if mirror:
+            frame = cv2.flip(frame, 1)
+
+        add_preview_overlay(frame, landmarker, preview_started_at)
         draw_prompt(frame, target, "Press s to start. Press q to quit.")
         cv2.imshow("ASL Fingerspelling Data Collection", frame)
         key = cv2.waitKey(1) & 0xFF
@@ -209,6 +370,9 @@ def record_clip(
     target: str,
     clip_path: Path,
     fps: float,
+    landmarker: vision.HolisticLandmarker | None,
+    preview_started_at: float,
+    mirror: bool,
 ) -> tuple[int, float]:
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 480
@@ -226,6 +390,9 @@ def record_clip(
             if not ok:
                 raise RuntimeError("Webcam frame read failed during recording")
 
+            if mirror:
+                frame = cv2.flip(frame, 1)
+
             now = time.monotonic()
             if now >= next_frame_at:
                 writer.write(frame)
@@ -234,6 +401,7 @@ def record_clip(
                     next_frame_at += frame_interval
 
             preview = frame.copy()
+            add_preview_overlay(preview, landmarker, preview_started_at)
             draw_prompt(preview, target, "Recording. Press e to stop.")
             cv2.imshow("ASL Fingerspelling Data Collection", preview)
 
@@ -482,16 +650,32 @@ def collect() -> None:
     cap = open_camera(args.camera, args.fps)
     clip_number_value = next_clip_number()
     target = initial_target(args)
+    preview_started_at = time.monotonic()
+    preview_landmarker = None if args.no_preview_overlay else create_holistic_landmarker()
 
     try:
         while True:
-            should_start = wait_for_start(cap, target)
+            should_start = wait_for_start(
+                cap,
+                target,
+                preview_landmarker,
+                preview_started_at,
+                mirror=not args.no_mirror,
+            )
             if not should_start:
                 break
 
             temp_path = CLIPS_DIR / "_pending_clip.mp4"
             cleanup_temp(temp_path)
-            recorded_frames, recorded_duration = record_clip(cap, target, temp_path, args.fps)
+            recorded_frames, recorded_duration = record_clip(
+                cap,
+                target,
+                temp_path,
+                args.fps,
+                preview_landmarker,
+                preview_started_at,
+                mirror=not args.no_mirror,
+            )
             print(
                 f"Recorded {recorded_frames} frames "
                 f"({recorded_duration:.2f} seconds at target {args.fps:g} FPS)."
@@ -544,6 +728,8 @@ def collect() -> None:
             clip_number_value += 1
             target = prompt_for_next_target(args)
     finally:
+        if preview_landmarker is not None:
+            preview_landmarker.close()
         cap.release()
         cv2.destroyAllWindows()
 
