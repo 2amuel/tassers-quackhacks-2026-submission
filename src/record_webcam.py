@@ -133,7 +133,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--sample-interval",
         type=float,
-        default=0.2,
+        default=0.05,
         help="Seconds between sampled images used for MediaPipe CSV output.",
     )
     parser.add_argument("--width", type=int, default=1280, help="Requested camera frame width.")

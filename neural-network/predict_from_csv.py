@@ -49,6 +49,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Do not subtract shoulder center and scale by shoulder width.",
     )
+    parser.add_argument(
+        "--sliding-window",
+        action="store_true",
+        help="Use 60-frame sliding windows instead of running the full CSV sequence at once.",
+    )
     return parser.parse_args()
 
 
@@ -225,7 +230,7 @@ def padded_window(features: torch.Tensor, end_index: int) -> torch.Tensor:
     return window
 
 
-def predict_each_frame(model: torch.nn.Module, features: torch.Tensor, device: str) -> str:
+def predict_sliding_windows(model: torch.nn.Module, features: torch.Tensor, device: str) -> str:
     predicted_path: list[int] = []
 
     print("sample,frame_token")
@@ -244,6 +249,19 @@ def predict_each_frame(model: torch.nn.Module, features: torch.Tensor, device: s
     return ctc_collapse(predicted_path)
 
 
+def predict_full_sequence(model: torch.nn.Module, features: torch.Tensor, device: str) -> str:
+    print("sample,frame_token")
+    with torch.no_grad():
+        batch = features.unsqueeze(0).to(device)
+        log_probs = model(batch)[:, 0, :]
+        predicted_path = torch.argmax(log_probs, dim=-1).tolist()
+
+    for sample_index, token_id in enumerate(predicted_path):
+        print(f"{sample_index},{OUTPUT_TOKENS[token_id]}")
+
+    return ctc_collapse(predicted_path)
+
+
 def main() -> None:
     args = parse_args()
     features = csv_to_feature_tensor(
@@ -251,7 +269,10 @@ def main() -> None:
         normalize_to_body=not args.no_body_normalize,
     )
     model = load_model(args.checkpoint, args.device)
-    prediction = predict_each_frame(model, features, args.device)
+    if args.sliding_window:
+        prediction = predict_sliding_windows(model, features, args.device)
+    else:
+        prediction = predict_full_sequence(model, features, args.device)
     print()
     print(f"final_prediction,{prediction}")
 

@@ -56,7 +56,7 @@ def parse_args() -> argparse.Namespace:
         default=CENTER_DELAY,
         help=(
             "Number of future frames to wait before a frame is considered finalized. "
-            "Defaults to half the 60-frame context window."
+            "Defaults to half the live 60-frame context window."
         ),
     )
     return parser.parse_args()

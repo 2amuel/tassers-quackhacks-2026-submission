@@ -84,18 +84,24 @@ class LandmarkLayout:
 class PositionalEncoding(nn.Module):
     def __init__(self, embed_dim: int, max_len: int = SEQUENCE_LENGTH):
         super().__init__()
+        self.embed_dim = embed_dim
+        self.register_buffer("pe", self._build(max_len))
+
+    def _build(self, max_len: int) -> torch.Tensor:
         position = torch.arange(max_len, dtype=torch.float32).unsqueeze(1)
         div_term = torch.exp(
-            torch.arange(0, embed_dim, 2, dtype=torch.float32)
-            * (-torch.log(torch.tensor(10000.0)) / embed_dim)
+            torch.arange(0, self.embed_dim, 2, dtype=torch.float32)
+            * (-torch.log(torch.tensor(10000.0)) / self.embed_dim)
         )
 
-        pe = torch.zeros(max_len, embed_dim)
+        pe = torch.zeros(max_len, self.embed_dim)
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term[: pe[:, 1::2].shape[1]])
-        self.register_buffer("pe", pe.unsqueeze(0))
+        return pe.unsqueeze(0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.size(1) > self.pe.size(1):
+            self.pe = self._build(x.size(1)).to(device=x.device, dtype=x.dtype)
         return x + self.pe[:, : x.size(1)]
 
 
@@ -103,7 +109,7 @@ class ASLTransformerCTC(nn.Module):
     """Transformer model for landmark-based ASL fingerspelling recognition.
 
     Input shape:
-        (batch, 60, 345)
+        (batch, frames, 345)
 
     Per-frame features:
         - 2 hands * 21 landmarks * xyz = 126
@@ -111,7 +117,7 @@ class ASLTransformerCTC(nn.Module):
         - 40 selected face landmarks * xyz = 120
 
     Output shape:
-        (60, batch, 27)
+        (frames, batch, 27)
 
     The output is log-probabilities for PyTorch's CTCLoss. Class 0 is the CTC
     blank token. Classes 1-26 are A-Z.
@@ -198,7 +204,7 @@ def example_ctc_loss() -> torch.Tensor:
 
 if __name__ == "__main__":
     model = create_model()
-    sample = torch.randn(4, SEQUENCE_LENGTH, INPUT_FEATURES_PER_FRAME)
+    sample = torch.randn(4, 81, INPUT_FEATURES_PER_FRAME)
     output = model(sample)
 
     print(f"Input shape:  {tuple(sample.shape)}")
