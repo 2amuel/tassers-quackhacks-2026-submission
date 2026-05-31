@@ -5,9 +5,11 @@ import base64
 import json
 import sys
 import time
+import traceback
 from collections import deque
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 import cv2
@@ -26,7 +28,7 @@ from live_predict import (  # noqa: E402
     DEFAULT_CHECKPOINT,
     create_holistic_landmarker,
     load_model,
-    result_to_left_hand_features,
+    result_to_left_hand_features as live_result_to_left_hand_features,
     smoothed_prediction,
 )
 from model import LETTERS  # noqa: E402
@@ -41,11 +43,14 @@ class StreamingPredictor:
         smoothing: int,
         normalize_to_body: bool,
         mirror: bool,
+        frame_width: int,
+        frame_height: int,
     ):
         self.device = device
         self.confidence_threshold = confidence_threshold
         self.normalize_to_body = normalize_to_body
         self.mirror = mirror
+        self.frame_size = (frame_width, frame_height)
         self.model = None
         self.window_frames = 48
         self.landmarker = None
@@ -90,6 +95,7 @@ class StreamingPredictor:
             return {"ok": False, "error": self.error or "Predictor is not ready."}
 
         frame = decode_image_data_url(image_data_url)
+        frame = cv2.resize(frame, self.frame_size, interpolation=cv2.INTER_AREA)
         if self.mirror:
             frame = cv2.flip(frame, 1)
 
@@ -148,6 +154,20 @@ def decode_image_data_url(image_data_url: str) -> np.ndarray:
     return frame
 
 
+def result_to_left_hand_features(result, normalize_to_body: bool) -> torch.Tensor:
+    """Use live_predict's feature path, but tolerate absent landmark groups."""
+    safe_result = SimpleNamespace(
+        pose_landmarks=getattr(result, "pose_landmarks", None) or [],
+        left_hand_landmarks=getattr(result, "left_hand_landmarks", None) or [],
+        right_hand_landmarks=getattr(result, "right_hand_landmarks", None) or [],
+        face_landmarks=getattr(result, "face_landmarks", None) or [],
+    )
+    return live_result_to_left_hand_features(
+        safe_result,
+        normalize_to_body=normalize_to_body,
+    )
+
+
 def make_handler(predictor_instance: StreamingPredictor):
     class GameHandler(SimpleHTTPRequestHandler):
         def __init__(self, *args, **kwargs):
@@ -176,7 +196,15 @@ def make_handler(predictor_instance: StreamingPredictor):
                     raise ValueError("Missing image field.")
                 self.send_json(predictor_instance.predict_data_url(image))
             except Exception as exc:
-                self.send_json({"ok": False, "error": str(exc)}, status=400)
+                traceback.print_exc()
+                self.send_json(
+                    {
+                        "ok": False,
+                        "error": str(exc),
+                        "errorType": type(exc).__name__,
+                    },
+                    status=200,
+                )
 
         def send_json(self, payload: dict, status: int = 200) -> None:
             body = json.dumps(payload).encode("utf-8")
@@ -197,6 +225,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--confidence-threshold", type=float, default=0.45)
     parser.add_argument("--smoothing", type=int, default=5)
+    parser.add_argument("--frame-width", type=int, default=1280)
+    parser.add_argument("--frame-height", type=int, default=720)
     parser.add_argument("--no-body-normalize", action="store_true")
     parser.add_argument("--no-mirror", action="store_true")
     return parser.parse_args()
@@ -211,6 +241,8 @@ def main() -> None:
         smoothing=args.smoothing,
         normalize_to_body=not args.no_body_normalize,
         mirror=not args.no_mirror,
+        frame_width=args.frame_width,
+        frame_height=args.frame_height,
     )
     server = ThreadingHTTPServer((args.host, args.port), make_handler(predictor_instance))
     url = f"http://{args.host}:{args.port}/"

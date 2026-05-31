@@ -619,6 +619,7 @@
       let lastPredictedVideoTime = -1;
       let lastPrediction = null;
       let backendAvailable = false;
+      let consecutivePredictionErrors = 0;
       const predictionCanvas = document.createElement("canvas");
       const predictionContext = predictionCanvas.getContext("2d", {
         willReadFrequently: true,
@@ -963,6 +964,7 @@
             throw new Error(prediction.error || "Prediction failed.");
           }
 
+          consecutivePredictionErrors = 0;
           lastPrediction = prediction;
           renderBackendLetter(prediction.letter, prediction.confidence);
 
@@ -986,10 +988,15 @@
             setMessage(`Backend sees ${prediction.letter}. Target: ${target}.`);
           }
         } catch (error) {
-          backendAvailable = false;
-          stopPredictionLoop();
           renderBackendLetter(null);
-          setMessage("Prediction backend stopped responding. Manual Score is available.");
+          consecutivePredictionErrors += 1;
+          if (consecutivePredictionErrors >= 10) {
+            backendAvailable = false;
+            stopPredictionLoop();
+            setMessage("Prediction backend stopped responding. Manual Score is available.");
+          } else if (gameState === "playing") {
+            setMessage("Prediction retrying...");
+          }
         } finally {
           isPredicting = false;
           scheduleNextPrediction();
