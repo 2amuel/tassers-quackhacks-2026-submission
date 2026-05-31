@@ -54,7 +54,7 @@ Record webcam footage and holistic landmark CSV data:
 python src/record_webcam.py
 ```
 
-This writes `webcam_capture.mp4`, `holistic_landmarks.csv`, and `recording_metadata.json` into a timestamped `outputs/recording-*` directory. It samples the live feed every `0.2` seconds by default and writes CSV rows in real time as each sample is processed. Press `q` in the preview window to stop.
+This writes `webcam_capture.mp4`, `holistic_landmarks.csv`, and `recording_metadata.json` into a timestamped `outputs/recording-*` directory. It samples the live feed every `0.2` seconds by default and writes CSV rows in real time as each sample is processed. Use `--debug-overlay` to save the output video with landmark markers rendered on each frame. Press `q` in the preview window to stop.
 
 Change the sampling interval or run for a bounded test duration:
 
