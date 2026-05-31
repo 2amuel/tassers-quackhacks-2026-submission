@@ -1,0 +1,524 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Letter Stream Game</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101319;
+        --panel: #181d26;
+        --panel-strong: #222938;
+        --ink: #f6f1e8;
+        --muted: #aab4c2;
+        --accent: #57d68d;
+        --accent-2: #f1c75b;
+        --main: #74b7ff;
+        --danger: #ff6b7a;
+        --circle-size: clamp(78px, 12vw, 138px);
+        --gap: clamp(12px, 2.6vw, 36px);
+        --slot-step: calc(var(--circle-size) + var(--gap));
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top left, rgba(87, 214, 141, 0.18), transparent 32rem),
+          linear-gradient(135deg, #101319 0%, #171e27 52%, #14151a 100%);
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(1120px, 100vw);
+        min-height: min(720px, 100vh);
+        padding: clamp(20px, 4vw, 48px);
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: clamp(24px, 5vh, 48px);
+      }
+
+      .hud {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+      }
+
+      .title {
+        display: grid;
+        gap: 4px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(24px, 4vw, 48px);
+        font-weight: 800;
+        line-height: 1;
+      }
+
+      .subtitle,
+      .key-hint {
+        margin: 0;
+        color: var(--muted);
+        font-size: clamp(14px, 1.7vw, 18px);
+      }
+
+      .scoreboard {
+        display: flex;
+        align-items: stretch;
+        gap: 10px;
+      }
+
+      .scorebox {
+        min-width: 112px;
+        padding: 12px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        background: rgba(24, 29, 38, 0.78);
+        box-shadow: 0 16px 40px rgba(0, 0, 0, 0.18);
+      }
+
+      .scorebox span {
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .scorebox strong {
+        display: block;
+        margin-top: 2px;
+        font-size: clamp(24px, 4vw, 42px);
+        line-height: 1;
+      }
+
+      .stage {
+        align-self: start;
+        display: grid;
+        justify-items: center;
+        gap: clamp(26px, 5vh, 56px);
+      }
+
+      .stream-window {
+        width: min(100%, calc((var(--circle-size) * 5) + (var(--gap) * 4) + 16px));
+        height: calc(var(--circle-size) + 18px);
+        overflow: hidden;
+        position: relative;
+        padding: 9px 8px;
+        isolation: isolate;
+      }
+
+      .stream-window::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(16, 19, 25, 0.78), rgba(255, 255, 255, 0.05), rgba(16, 19, 25, 0.78));
+        opacity: 0.74;
+        z-index: -1;
+      }
+
+      .circle-track {
+        display: flex;
+        gap: var(--gap);
+        width: max-content;
+        transform: translateX(0);
+      }
+
+      .circle-track.is-moving {
+        transition: transform 300ms cubic-bezier(0.22, 0.88, 0.26, 1);
+        transform: translateX(calc(var(--slot-step) * -1));
+      }
+
+      .letter-circle {
+        width: var(--circle-size);
+        height: var(--circle-size);
+        flex: 0 0 var(--circle-size);
+        display: grid;
+        place-items: center;
+        border: 3px solid rgba(255, 255, 255, 0.18);
+        border-radius: 50%;
+        background:
+          linear-gradient(150deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03)),
+          var(--panel);
+        color: var(--ink);
+        font-size: clamp(42px, 7.5vw, 84px);
+        font-weight: 900;
+        line-height: 1;
+        text-transform: uppercase;
+        text-shadow: 0 5px 18px rgba(0, 0, 0, 0.38);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.18),
+          0 18px 42px rgba(0, 0, 0, 0.32);
+        user-select: none;
+      }
+
+      .letter-circle.main {
+        border-color: rgba(116, 183, 255, 0.92);
+        background:
+          radial-gradient(circle at 34% 24%, rgba(255, 255, 255, 0.36), transparent 35%),
+          linear-gradient(150deg, rgba(116, 183, 255, 0.42), rgba(34, 41, 56, 0.92));
+        box-shadow:
+          0 0 0 8px rgba(116, 183, 255, 0.13),
+          0 22px 56px rgba(47, 143, 255, 0.32);
+        transform: translateY(8px) scale(1.08);
+      }
+
+      .play-panel {
+        width: min(680px, 100%);
+        display: grid;
+        gap: 16px;
+        justify-items: center;
+        text-align: center;
+      }
+
+      .main-letter {
+        width: min(100%, 620px);
+        aspect-ratio: 16 / 10;
+        position: relative;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+        padding: 0;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        background: #05070a;
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+      }
+
+      .main-letter video {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        transform: scaleX(-1);
+      }
+
+      .main-letter::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(180deg, rgba(5, 7, 10, 0.2), rgba(5, 7, 10, 0.72)),
+          radial-gradient(circle at center, transparent 35%, rgba(5, 7, 10, 0.38));
+        pointer-events: none;
+      }
+
+      .camera-message {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        color: var(--muted);
+        background: linear-gradient(135deg, rgba(24, 29, 38, 0.96), rgba(34, 41, 56, 0.9));
+        font-size: clamp(16px, 2.4vw, 22px);
+        font-weight: 800;
+        text-align: center;
+      }
+
+      .camera-message.is-hidden {
+        display: none;
+      }
+
+      .main-letter-label {
+        position: absolute;
+        left: 18px;
+        top: 16px;
+        z-index: 1;
+        display: block;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+      }
+
+      .main-letter strong {
+        position: relative;
+        z-index: 1;
+        display: block;
+        width: clamp(100px, 18vw, 168px);
+        height: clamp(100px, 18vw, 168px);
+        display: grid;
+        place-items: center;
+        border: 3px solid rgba(116, 183, 255, 0.95);
+        border-radius: 50%;
+        background: rgba(16, 19, 25, 0.62);
+        color: var(--main);
+        font-size: clamp(56px, 10vw, 112px);
+        line-height: 0.95;
+        box-shadow:
+          0 0 0 8px rgba(116, 183, 255, 0.14),
+          0 20px 46px rgba(0, 0, 0, 0.44);
+        backdrop-filter: blur(3px);
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 10px;
+      }
+
+      button {
+        min-height: 44px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        padding: 0 16px;
+        color: var(--ink);
+        background: var(--panel-strong);
+        font: inherit;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      button:hover,
+      button:focus-visible {
+        border-color: rgba(87, 214, 141, 0.72);
+        outline: none;
+      }
+
+      .score-key {
+        background: var(--accent);
+        color: #07110b;
+      }
+
+      .footer {
+        display: flex;
+        justify-content: center;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      kbd {
+        display: inline-grid;
+        min-width: 46px;
+        min-height: 28px;
+        place-items: center;
+        margin: 0 4px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-bottom-width: 3px;
+        border-radius: 6px;
+        padding: 2px 8px;
+        background: rgba(255, 255, 255, 0.08);
+        color: var(--ink);
+        font-family: inherit;
+        font-size: 0.9em;
+        font-weight: 800;
+      }
+
+      @media (max-width: 700px) {
+        body {
+          overflow-y: auto;
+        }
+
+        main {
+          min-height: 100vh;
+        }
+
+        .hud {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .scoreboard {
+          width: 100%;
+        }
+
+        .scorebox {
+          flex: 1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="hud" aria-label="Game status">
+        <div class="title">
+          <h1>Letter Stream</h1>
+          <p class="subtitle">Score the main letter to push the stream forward.</p>
+        </div>
+        <div class="scoreboard">
+          <div class="scorebox">
+            <span>Score</span>
+            <strong id="score">0</strong>
+          </div>
+          <div class="scorebox">
+            <span>Streak</span>
+            <strong id="streak">0</strong>
+          </div>
+        </div>
+      </header>
+
+      <section class="stage" aria-label="Letter stream game">
+        <div class="stream-window" aria-live="polite">
+          <div class="circle-track" id="circleTrack"></div>
+        </div>
+
+        <div class="play-panel">
+          <div class="main-letter">
+            <video id="webcamVideo" autoplay muted playsinline></video>
+            <div class="camera-message" id="cameraMessage">Allow camera access to fill this box with your webcam.</div>
+            <span class="main-letter-label">Main circle</span>
+            <strong id="mainLetter">A</strong>
+          </div>
+          <p class="key-hint">Press <kbd>Space</kbd> to score and advance the stream.</p>
+          <div class="controls" aria-label="Game controls">
+            <button class="score-key" id="scoreButton" type="button">Score</button>
+            <button id="resetButton" type="button">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span>Five circles show the active stream window; the center circle is always the current target.</span>
+      </footer>
+    </main>
+
+    <script>
+      const ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      const scoreKey = " ";
+      const visibleCount = 5;
+      const mainIndex = 2;
+
+      const track = document.querySelector("#circleTrack");
+      const scoreElement = document.querySelector("#score");
+      const streakElement = document.querySelector("#streak");
+      const mainLetterElement = document.querySelector("#mainLetter");
+      const scoreButton = document.querySelector("#scoreButton");
+      const resetButton = document.querySelector("#resetButton");
+      const webcamVideo = document.querySelector("#webcamVideo");
+      const cameraMessage = document.querySelector("#cameraMessage");
+
+      let stream = [];
+      let score = 0;
+      let streak = 0;
+      let isMoving = false;
+
+      function randomLetter() {
+        return ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+      }
+
+      function buildStream(length = 8) {
+        stream = Array.from({ length }, randomLetter);
+      }
+
+      function ensureStreamLength() {
+        while (stream.length < visibleCount + 2) {
+          stream.push(randomLetter());
+        }
+      }
+
+      function renderTrack(includeIncoming = false) {
+        ensureStreamLength();
+        const letters = includeIncoming
+          ? stream.slice(0, visibleCount + 1)
+          : stream.slice(0, visibleCount);
+
+        track.innerHTML = "";
+        letters.forEach((letter, index) => {
+          const circle = document.createElement("div");
+          circle.className = index === mainIndex ? "letter-circle main" : "letter-circle";
+          circle.textContent = letter;
+          circle.setAttribute("aria-label", index === mainIndex ? `${letter}, main circle` : letter);
+          track.append(circle);
+        });
+
+        mainLetterElement.textContent = stream[mainIndex];
+      }
+
+      function renderScores() {
+        scoreElement.textContent = score;
+        streakElement.textContent = streak;
+      }
+
+      function advanceStream() {
+        if (isMoving) {
+          return;
+        }
+
+        isMoving = true;
+        score += 1;
+        streak += 1;
+        stream.push(randomLetter());
+        renderScores();
+        renderTrack(true);
+
+        requestAnimationFrame(() => {
+          track.classList.add("is-moving");
+        });
+      }
+
+      function finishAdvance() {
+        if (!isMoving) {
+          return;
+        }
+
+        stream.shift();
+        track.classList.remove("is-moving");
+        renderTrack(false);
+        isMoving = false;
+      }
+
+      function resetGame() {
+        score = 0;
+        streak = 0;
+        isMoving = false;
+        track.classList.remove("is-moving");
+        buildStream();
+        renderScores();
+        renderTrack(false);
+      }
+
+      async function startWebcam() {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          cameraMessage.textContent = "This browser cannot access a webcam.";
+          return;
+        }
+
+        try {
+          const mediaStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: "user",
+            },
+            audio: false,
+          });
+          webcamVideo.srcObject = mediaStream;
+          cameraMessage.classList.add("is-hidden");
+        } catch (error) {
+          cameraMessage.textContent = "Camera access is blocked. Enable it in the browser to show your webcam here.";
+        }
+      }
+
+      track.addEventListener("transitionend", finishAdvance);
+      scoreButton.addEventListener("click", advanceStream);
+      resetButton.addEventListener("click", resetGame);
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === scoreKey) {
+          event.preventDefault();
+          advanceStream();
+        }
+      });
+
+      resetGame();
+      startWebcam();
+    </script>
+  </body>
+</html>
