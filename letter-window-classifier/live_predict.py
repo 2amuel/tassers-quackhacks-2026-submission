@@ -27,15 +27,25 @@ from model import LETTERS, create_model
 
 
 PROJECT_ROOT = SCRIPT_DIR.parent
-DEFAULT_CHECKPOINT = PROJECT_ROOT / "models" / "asl_left_hand_letter_window_transformer_sequences.pt"
+MODELS_DIR = PROJECT_ROOT / "models"
+FALLBACK_CHECKPOINT = MODELS_DIR / "asl_left_hand_letter_window_transformer_sequences.pt"
 HOLISTIC_MODEL_PATH = PROJECT_ROOT / "src" / "models" / "holistic_landmarker.task"
+
+
+def newest_left_hand_checkpoint() -> Path:
+    checkpoints = sorted(
+        MODELS_DIR.glob("asl_left_hand_letter_window_transformer*.pt"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    return checkpoints[0] if checkpoints else FALLBACK_CHECKPOINT
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run the letter-window classifier on live webcam video."
     )
-    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
+    parser.add_argument("--checkpoint", type=Path, default=newest_left_hand_checkpoint())
     parser.add_argument("--camera", type=int, default=0)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--confidence-threshold", type=float, default=0.45)

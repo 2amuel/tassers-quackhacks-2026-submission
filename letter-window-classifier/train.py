@@ -204,7 +204,7 @@ def main() -> None:
             uses_default_labels or args.sequence_labels_csv or args.sam_letter_data_dir
         )
         checkpoint_name = (
-            "asl_left_hand_letter_window_transformer_letters.pt"
+            "asl_left_hand_letter_window_transformer_sequences.pt"
             if uses_extra_manifest
             else "asl_left_hand_letter_window_transformer_letters.pt"
         )
